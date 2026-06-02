@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MockTFL Editor</title>
+
+    <!-- Office JavaScript API -->
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  </head>
+
+  <body>
+    <style>
+      body {
+        margin: 0;
+        padding: 14px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+        font-size: 13px;
+        color: #1a1a1a;
+      }
+      h2 {
+        margin: 0 0 10px 0;
+        font-size: 16px;
+      }
+      .row { margin-bottom: 10px; }
+      .label { display: block; font-weight: 600; margin-bottom: 6px; }
+      .column-config-box {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #fafafa;
+      }
+      .checkbox-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .column-group-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .column-group-row input[type="text"] {
+        flex: 1;
+        padding: 8px 10px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font: inherit;
+        box-sizing: border-box;
+      }
+      .column-group-subtitle-input {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font: inherit;
+        box-sizing: border-box;
+      }
+      .column-structure-select {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font: inherit;
+        box-sizing: border-box;
+        background: #fff;
+      }
+      .column-structure-placeholder {
+        min-height: 80px;
+        border: 1px dashed #d0d0d0;
+        border-radius: 8px;
+        background: #fff;
+      }
+      .sublevel-block {
+        border: 1px solid #d9d9d9;
+        border-radius: 8px;
+        background: #fff;
+        padding: 10px;
+      }
+      .sublevel-header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .sublevel-header-row .label {
+        margin-bottom: 0;
+      }
+      .sublevel-input-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .sublevel-input-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .sublevel-input-list input {
+        flex: 1;
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font: inherit;
+        box-sizing: border-box;
+      }
+      .sublevel-actions {
+        display: flex;
+        gap: 6px;
+      }
+      .sublevel-input-actions {
+        display: flex;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      button.icon-btn {
+        min-width: 32px;
+        padding: 6px 8px;
+        font-weight: 600;
+      }
+      textarea {
+        width: 100%;
+        min-height: 260px;
+        resize: vertical;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font: inherit;
+        box-sizing: border-box;
+      }
+      textarea.readonly-box {
+        min-height: 120px;
+        background: #fafafa;
+      }
+      textarea.analysis-box {
+        min-height: 120px;
+      }
+      textarea.code-box {
+        min-height: 260px;
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .figure-preview-box {
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #fafafa;
+      }
+      .figure-preview-box img {
+        display: block;
+        max-width: 100%;
+        border: 1px solid #ddd;
+        background: #fff;
+      }
+      .corresponding-table-box {
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #fafafa;
+        font-weight: 600;
+      }
+      .figure-data-table-box {
+        overflow-x: auto;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #fff;
+      }
+      .figure-data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      .figure-data-table th,
+      .figure-data-table td {
+        padding: 7px 8px;
+        border-bottom: 1px solid #eee;
+        text-align: left;
+        white-space: nowrap;
+      }
+      .figure-data-table th {
+        background: #f5f5f5;
+        font-weight: 600;
+      }
+      .figure-data-table tr:last-child td {
+        border-bottom: 0;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      button {
+        padding: 7px 10px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #fff;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      button.primary { background:#106ebe; color:#fff; border-color:#106ebe; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .status { font-size: 12px; color: #666; margin-top: 8px; }
+    </style>
+
+    <h2 id="workitem-title">MockTFL Item</h2>
+
+    <div class="row" id="column-orientation-row" style="margin-bottom: 14px;">
+      <span class="label">Column header direction</span>
+      <select id="column-orientation-select" class="column-structure-select">
+        <option value="">Select direction</option>
+        <option value="vertical">Vertical</option>
+        <option value="horizontal">Horizontal</option>
+      </select>
+    </div>
+
+    <div id="vertical-workflow-root" style="display:none;">
+      <div class="row" id="columns-selection-row" style="display:none; margin-bottom: 14px;">
+        <span class="label">Column structure configuration</span>
+        <div class="column-config-box">
+          <div>
+            <span class="label">Select and edit column groups</span>
+            <div id="columns-checkbox-list" class="checkbox-list">
+              <!-- Checkboxes will be injected here -->
+            </div>
+          </div>
+          <div>
+            <span class="label">Column group subtitle (optional)</span>
+            <input
+              id="column-group-subtitle"
+              class="column-group-subtitle-input"
+              type="text"
+              placeholder="Applies to every selected column group, e.g. Baseline Value"
+            />
+          </div>
+          <div id="sublevel-config-list">
+            <!-- Dynamic header layer blocks will be injected here -->
+          </div>
+          <div>
+            <button id="btn-add-sublevel-header" type="button">Add header layer</button>
+          </div>
+        </div>
+      </div>
+
+      <!--
+        Keep the analysis trigger at the top.
+        The editable Notes box is rendered after the mapping evidence so users can
+        review the matched CRF questions first, then edit/insert the final text.
+      -->
+      <div class="row">
+        <span class="label">Analysis</span>
+        <div class="actions" style="margin: 0 0 10px 0;">
+          <button id="btn-start-analysis" class="primary" style="display:none;">Start analysis</button>
+        </div>
+      </div>
+
+      <!--
+        Additional analysis panels:
+        1) Original matched SAP section text
+        2) Editable GPT-suggested statistical variables
+        3) Mapped CRF questions and answers after the user confirms the variables
+        NOTE: We keep the existing Notes box behavior unchanged.
+      -->
+      <div class="row" id="sap-section-row" style="margin-top:14px; display:none;">
+        <span class="label" id="sap-matched-label">Matched SAP section text</span>
+        <textarea id="sap-section-text" class="readonly-box" readonly placeholder="Matched SAP section text will appear here..."></textarea>
+      </div>
+
+      <div class="row" id="variables-row" style="display:none;">
+        <span class="label">Suggested statistical variables (editable before CRF mapping)</span>
+        <textarea
+          id="sap-statistical-variables-text"
+          class="analysis-box"
+          placeholder="GPT-suggested statistical variables will appear here..."
+        ></textarea>
+        <div class="actions" id="confirm-variables-row" style="margin-top:8px; display:none;">
+          <button id="btn-confirm-variables" class="primary">Confirm Variables &amp; Map to CRF</button>
+        </div>
+      </div>
+
+      <div class="row" id="mapping-row" style="display:none;">
+        <span class="label">Mapped CRF questions and answers for suggested variables</span>
+        <textarea
+          id="crf-mapped-qa-text"
+          class="readonly-box"
+          readonly
+          placeholder="Mapped CRF questions and corresponding answers/options will appear here..."
+        ></textarea>
+      </div>
+
+      <div class="row" id="editor-row" style="display:none;">
+        <span class="label">Notes (Content Control)</span>
+        <textarea id="editor" placeholder="Type your notes here..."></textarea>
+      </div>
+
+      <div class="actions" id="editor-actions-row" style="display:none;">
+        <button id="btn-insert" class="primary">Insert</button>
+        <button id="btn-clear">Clear</button>
+        <button id="btn-close">Close</button>
+      </div>
+    </div>
+
+    <div id="horizontal-workflow-root" style="display:none;">
+      <div class="row" id="horizontal-columns-selection-row" style="margin-bottom: 14px;">
+        <span class="label">Column structure configuration</span>
+        <div class="column-config-box">
+          <div id="horizontal-column-config-placeholder" class="column-structure-placeholder"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="figure-workflow-root" style="display:none;">
+      <div class="actions" id="figure-find-table-row" style="margin-top:8px;">
+        <button id="btn-find-corresponding-table" class="primary">Find Corresponding Table</button>
+      </div>
+
+      <div class="row" id="corresponding-table-row" style="display:none; margin-top:14px;">
+        <span class="label">Corresponding Table</span>
+        <div class="corresponding-table-box" id="corresponding-table-box"></div>
+      </div>
+
+      <div class="row" id="figure-type-row" style="display:none; margin-top:14px;">
+        <span class="label">Figure Type</span>
+        <div class="actions" style="margin-bottom:8px;">
+          <button id="btn-define-figure-type" class="primary">Defining Figure Type</button>
+        </div>
+        <textarea
+          id="figure-type-text"
+          placeholder="GPT-suggested figure type will appear here (editable)..."
+          style="width:100%; min-height:48px;"
+        ></textarea>
+      </div>
+
+      <div class="actions" id="figure-auto-generate-row" style="margin-top:8px; display:none;">
+        <button id="btn-auto-generate-figure" class="primary">Auto Generate Data &amp; Figure</button>
+      </div>
+
+      <div
+        id="figure-table-info-status"
+        style="display:none; margin-top:8px; padding:8px 10px; border-radius:6px; font-size:13px; line-height:1.4;"
+      ></div>
+
+      <div class="row" id="figure-mock-data-row" style="display:none; margin-top:14px;">
+        <span class="label">Generated Mock Data (JSON)</span>
+        <textarea
+          id="figure-mock-data-text"
+          class="readonly-box"
+          readonly
+          placeholder="Auto-generated mock data will appear here..."
+        ></textarea>
+      </div>
+
+      <div class="row" id="figure-mock-data-table-row" style="display:none; margin-top:14px;">
+        <span class="label">Generated Mock Data (Table)</span>
+        <div class="figure-data-table-box">
+          <table class="figure-data-table" id="figure-mock-data-table"></table>
+        </div>
+      </div>
+
+      <div class="row" id="figure-preview-row" style="display:none; margin-top:14px;">
+        <span class="label">Generated Figure Preview</span>
+        <div class="figure-preview-box">
+          <img id="figure-preview-image" alt="Generated MockTFL figure preview" />
+        </div>
+      </div>
+
+      <div class="actions" id="figure-actions-row">
+        <button id="btn-insert-figure" class="primary" disabled>Insert</button>
+        <button id="btn-clear-figure">Clear</button>
+        <button id="btn-close-figure">Close</button>
+      </div>
+    </div>
+
+    <div id="status" class="status"></div>
+  </body>
+</html>
+

@@ -1,0 +1,1019 @@
+Open Editor
+
+Overview
+This document explains the current MockTFL "Open Editor" logic in AI-for-Word. The purpose of this feature is to let the user open a dedicated dialog for one specific MockTFL work item, restore any previously saved section data if it exists, optionally run the MockTFL analysis workflow, review and edit the generated Notes, choose dynamic table columns, insert the result back into Word, and save the section snapshot into the MockTFL database state.
+
+This part of the system is not just a popup editor. It is the orchestration layer that connects:
+- the selected MockTFL item in the taskpane
+- the title/body content controls already inserted into Word
+- the MockTFL dialog UI
+- backend SAP and CRF analysis APIs
+- Word table insertion logic
+- MockTFL section-level database persistence
+
+End-to-End Purpose
+The feature solves the following problem:
+- After the user inserts the MockTFL template, they need to work on one specific table/figure/listing at a time.
+- The system must know exactly which Word location belongs to that work item.
+- The system must be able to reopen a previously saved section and restore all related analysis text.
+- For supported prototype items, the system must guide the user through SAP matching, variable extraction, CRF mapping, and final insertion.
+- For supported tables, the system must insert a structured Word table instead of plain text.
+
+High-Level Flow
+The current flow is:
+1. User selects a MockTFL work item in the "Start working on" dropdown.
+2. Frontend parses the selected value and selects the corresponding body content control in Word.
+3. User clicks "Open Editor".
+4. Frontend opens a separate Office dialog for MockTFL editing.
+5. The dialog tells the parent page it is ready.
+6. The parent reads the Word title content control for the selected work item.
+7. The parent loads the current MockTFL state from the database.
+8. The parent checks whether the current section already has saved data.
+9. If saved data exists, the parent sends that saved data into the dialog.
+10. If no saved data exists, the parent sends an empty initialization message into the dialog.
+11. The dialog renders the current item title, dynamic column options, and any saved analysis content.
+12. For supported items, the user can click "Start analysis".
+13. The parent sends the selected item title to the backend for SAP matching and variable extraction.
+14. The user reviews or edits the suggested variables.
+15. The user clicks "Confirm Variables & Map to CRF".
+16. The parent sends the confirmed variables to the backend for CRF mapping.
+17. The backend returns grouped CRF mapping results, which are converted into final Notes text.
+18. The user may edit the Notes text and choose table columns.
+19. The user clicks "Insert".
+20. The parent inserts the result back into the correct Word body content control.
+21. The parent saves the section snapshot into the MockTFL database state.
+
+Main Files Involved
+
+Main taskpane controller
+- frontend/src/taskpane/controller/appController.js
+
+MockTFL work-item controller
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+MockTFL state controller
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflStateController.js
+
+Dialog HTML
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.html
+
+Dialog logic
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+
+Word content control helpers
+- frontend/src/taskpane/domains/mocktfl/word/sections.js
+- frontend/src/taskpane/domains/mocktfl/word/constants.js
+
+Backend routes
+- backend/routes/mocktfl.routes.js
+
+Backend analysis service
+- backend/services/mocktfl/mockTflStartAnalysisService.js
+
+Frontend APIs
+- frontend/src/taskpane/domains/mocktfl/api/startAnalysis.js
+- frontend/src/taskpane/domains/mocktfl/api/mapVariablesToCrf.js
+- frontend/src/taskpane/domains/mocktfl/api/state.js
+
+Table insertion files
+- frontend/src/taskpane/domains/mocktfl/word/tables/table14_1_1_2_patientDisposition.js
+- frontend/src/taskpane/domains/mocktfl/word/tables/table14_1_3_1_summaryOfDemographics.js
+
+Detailed Logic
+
+Step 1: User selects a MockTFL work item in the taskpane
+Files:
+- frontend/src/taskpane/controller/appController.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Behavior:
+- The selected value from the dropdown has the format:
+  `TYPE:NUMBER`
+  Example:
+  `TABLE:14.1.1.2`
+- When the user changes the dropdown, the taskpane calls:
+  `handleMockTflWorkItemChange({ studyNumber, value })`
+
+Inside `handleMockTflWorkItemChange(...)`:
+- It calls `parseMockTflWorkItemValue(value)` to split the string into:
+  - `type`
+  - `number`
+- It then calls:
+  `selectMockTflBody({ studyNumber, type, number })`
+
+Purpose:
+- To identify exactly which MockTFL item the user wants to work on.
+- To move Word selection to the correct body placeholder before the dialog opens.
+
+Effect:
+- The corresponding MockTFL body content control in Word becomes selected.
+- The `Open Editor` button becomes available.
+
+Step 2: Select the target body content control in Word
+File:
+- frontend/src/taskpane/domains/mocktfl/word/sections.js
+
+Function:
+- `selectMockTflBody({ studyNumber, type, number })`
+
+Behavior:
+- Uses `buildMockTflBodyTag(...)` to generate the body content control tag.
+- Runs `Word.run(...)`.
+- Gets the content control by tag using:
+  `context.document.contentControls.getByTag(tag)`
+- Selects the first matched content control.
+
+Used APIs:
+- Office Word JavaScript API
+- `Word.run`
+- `contentControls.getByTag`
+- `select`
+
+Purpose:
+- To anchor the current work item to the correct Word location.
+
+Effect:
+- Later insertion logic already knows the correct placeholder region in the document.
+
+Step 3: User clicks Open Editor
+Files:
+- frontend/src/taskpane/controller/appController.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Behavior in `appController.js`:
+- Reads the selected work item from `sectionSelect`.
+- Calls `parseMockTflWorkItemValue(selection)`.
+- Looks up the entry in `insertedMockTflEntries`.
+- Builds a readable label using:
+  `buildMockTflLabel({ type, number, title })`
+- Calls:
+  `openMockTflEditorDialogForWorkItem({ studyNumber, type, number, label })`
+
+Purpose:
+- To open a dedicated editor for the current MockTFL item, with enough context to restore or analyze it.
+
+Effect:
+- The separate MockTFL dialog workflow starts.
+
+Step 4: Open the MockTFL editor dialog
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Function:
+- `openMockTflEditorDialogForWorkItem({ studyNumber, type, number, label })`
+
+Behavior:
+- Checks whether the Office dialog API exists:
+  `Office.context.ui.displayDialogAsync`
+- Closes any previous dialog with:
+  `closeMockTflEditorDialog()`
+- Builds the URL:
+  `window.location.origin + "/mockTflEditorDialog.html"`
+- Opens the dialog via:
+  `Office.context.ui.displayDialogAsync(dialogUrl, { height: 70, width: 40 }, ...)`
+
+Used APIs:
+- Office Dialog API
+- `Office.context.ui.displayDialogAsync`
+
+Purpose:
+- To launch a dedicated workspace for one MockTFL item.
+
+Effect:
+- A new dialog window opens for the selected MockTFL item.
+
+Step 5: Register dialog event handlers
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Behavior:
+- After the dialog opens successfully, the parent stores the dialog object in:
+  `mockTflEditorDialog`
+- The parent registers:
+  - `Office.EventType.DialogMessageReceived`
+  - `Office.EventType.DialogEventReceived`
+
+Dialog message handling:
+- Parent receives JSON messages from the child dialog.
+- Supported message types include:
+  - `mocktfl:dialogReady`
+  - `mocktfl:startAnalysis`
+  - `mocktfl:confirmVariables`
+  - `mocktfl:insert`
+  - `mocktfl:clear`
+  - `mocktfl:close`
+
+Purpose:
+- To create the communication channel between the parent taskpane and the child dialog.
+
+Effect:
+- The parent becomes the orchestrator for all later dialog actions.
+
+Step 6: Dialog initializes and notifies the parent
+Files:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.html
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+
+Dialog UI areas:
+- Title
+- Select table columns
+- Start analysis button
+- Matched SAP section panel
+- Suggested variables panel
+- Confirm Variables button
+- Mapped CRF evidence panel
+- Notes editor
+- Insert / Clear / Close buttons
+- Status text
+
+Dialog initialization behavior:
+- `Office.initialize = () => { ... }`
+- The dialog calls `bindUi()`
+- Sets status to `Loading...`
+- Sends a parent message:
+  `mocktfl:dialogReady`
+
+Used APIs:
+- Office Dialog messaging API
+- `Office.initialize`
+- `Office.context.ui.messageParent`
+- `Office.context.ui.addHandlerAsync`
+
+Purpose:
+- To tell the parent that the dialog is loaded and ready to receive initial data.
+
+Effect:
+- The parent can now send the initial work item state to the dialog.
+
+Step 7: Parent reads the Word title content control
+Files:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+- frontend/src/taskpane/domains/mocktfl/word/sections.js
+
+Behavior after receiving `mocktfl:dialogReady`:
+- Parent calls:
+  `readMockTflTitle({ studyNumber, type, number })`
+- This reads the title content control text from Word.
+- Parent then calls:
+  `extractPureTitleFromMockTflTitleCcText(titleCcText)`
+
+Purpose:
+- To use the actual Word title content control as the source of truth.
+- To derive a semantic title without the `TABLE 14.x` / `FIGURE ...` prefix.
+
+Effect:
+- Parent obtains:
+  - `titleCcText`
+  - `pureTitle`
+
+Why this matters:
+- If the user edits the title directly in Word, analysis still uses the updated document title.
+- The pure title is later used for embedding and SAP/CRF matching.
+
+Step 8: Parent loads MockTFL state from the database
+Files:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+- frontend/src/taskpane/domains/mocktfl/api/state.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflStateController.js
+- backend/routes/mocktfl.routes.js
+
+Behavior:
+- Parent calls:
+  `loadMockTflState({ studyNumber })`
+- The frontend API sends:
+  `GET /api/mocktfl/state?studyNumber=...`
+- Parent then calls:
+  `findMockTflSectionData(state, { type, number })`
+
+Purpose:
+- To determine whether this specific MockTFL item was already analyzed and saved before.
+
+Effect:
+- Parent gets:
+  - the global study-level MockTFL state
+  - the current section-level saved snapshot, if any
+
+Step 9: Parent builds dynamic availableColumns for the dialog
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Behavior:
+- The parent constructs:
+  `availableColumns = [state.drug1, state.drug2, "Overall"].filter(Boolean)`
+
+Purpose:
+- To provide dynamic table column choices at the top of the dialog.
+
+Effect:
+- The dialog receives user-facing column options such as:
+  - saved Drug 1
+  - saved Drug 2
+  - Overall
+
+Important note:
+- These values come from the global MockTFL state saved earlier by the Select Drug Comparison step.
+
+Step 10: Parent decides whether to load saved section data or initialize a blank editor
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Branch A: saved section exists and `saved === true`
+- Parent sends:
+  `mocktfl:loadSavedSectionData`
+- Payload contains:
+  - `studyNumber`
+  - `workItem`
+  - `savedSectionData`
+  - `availableColumns`
+
+Branch B: no saved section data
+- Parent sends:
+  `mocktfl:init`
+- Payload contains:
+  - `studyNumber`
+  - `workItem`
+  - `availableColumns`
+
+Purpose:
+- To either restore a previous section workflow or start a fresh one.
+
+Effect:
+- The dialog opens in restore mode or blank-init mode depending on the database state.
+
+Step 11: Dialog handles `mocktfl:init`
+File:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+
+Behavior:
+- Sets the dialog title from `workItem.label`
+- Stores:
+  - `analysisEnabledForCurrentItem`
+  - `mappingCompleted = false`
+- Clears analysis panels
+- Renders column checkboxes via:
+  `renderColumnCheckboxes(msg.availableColumns)`
+- Shows or hides the Start Analysis button
+- Sets button states:
+  - Start analysis enabled only if allowed
+  - Confirm variables disabled
+  - Insert enabled only if analysis is not required for this item
+
+Purpose:
+- To prepare an empty editor for the selected item.
+
+Effect:
+- User sees a clean dialog ready for analysis or direct editing, depending on the item.
+
+Step 12: Dialog handles `mocktfl:loadSavedSectionData`
+File:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+
+Behavior:
+- Sets the title
+- Marks:
+  - `analysisEnabledForCurrentItem`
+  - `mappingCompleted = true`
+- Clears old UI state
+- Renders dynamic columns
+- Changes Start Analysis button text to:
+  `Re-analysis`
+- Restores:
+  - matched SAP label/text
+  - suggested variables
+  - mapped CRF evidence text
+  - notes text
+- Shows all related panels
+- Enables buttons according to restored text presence
+
+Purpose:
+- To let the user reopen a previously saved section without losing earlier work.
+
+Effect:
+- The dialog appears already filled with the last saved analysis content.
+
+Step 13: Analysis is only enabled for a small allowlist
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Current allowlist:
+- `TABLE:14.1.1.2`
+- `TABLE:14.1.3.1`
+
+Relevant constants:
+- `ANALYSIS_ALLOWLIST`
+- `TABLE_INSERT_ALLOWLIST`
+
+Meaning:
+- Only these items currently support the full Start Analysis prototype.
+- Only these items currently support structured Word table insertion.
+
+Purpose:
+- To keep the prototype tightly controlled.
+
+Effect:
+- Other MockTFL items do not run the full analysis workflow.
+
+Step 14: Dialog top section renders dynamic column checkboxes
+File:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+
+Functions:
+- `renderColumnCheckboxes(availableColumns)`
+- `getSelectedColumns()`
+
+Behavior:
+- If no columns are available, hides the whole columns row.
+- If columns are available, creates one checkbox per column.
+- Each checkbox is checked by default.
+- On Insert, the selected values are included in the message sent to the parent.
+
+Purpose:
+- To let the user control which table columns should appear in the final Word table.
+
+Effect:
+- The user can choose a subset of:
+  - Drug 1
+  - Drug 2
+  - Overall
+
+Step 15: User clicks Start Analysis
+Files:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Dialog behavior:
+- Clears the analysis panels
+- Sets status to `Analyzing...`
+- Marks `mappingCompleted = false`
+- Disables Insert if analysis is required
+- Disables Start Analysis button
+- Sends:
+  `mocktfl:startAnalysis`
+
+Parent behavior:
+- Validates that the selected item is in the analysis allowlist
+- Sends dialog message:
+  `mocktfl:analysisRunning`
+- Re-reads the title content control from Word
+- Rebuilds `pureTitle`
+- Calls frontend API:
+  `startMockTflAnalysis({ studyNumber, type, number, pureTitle })`
+
+Purpose:
+- To launch the first backend analysis step based on the actual Word title.
+
+Effect:
+- SAP matching and variable suggestion begin.
+
+Step 16: Frontend Start Analysis API
+File:
+- frontend/src/taskpane/domains/mocktfl/api/startAnalysis.js
+
+Request:
+- `POST /api/mocktfl/start-analysis`
+
+Payload:
+- `studyNumber`
+- `type`
+- `number`
+- `pureTitle`
+
+Purpose:
+- To send the selected item title context to the backend.
+
+Effect:
+- Backend begins the MockTFL Step 1 analysis.
+
+Step 17: Backend Start Analysis route
+File:
+- backend/routes/mocktfl.routes.js
+
+Behavior:
+- Validates:
+  - `studyNumber`
+  - `pureTitle`
+  - database connectivity
+- Enforces the same allowlist restriction
+- Calls:
+  `startMockTflAnalysis({ studyNumber, pureTitle, mongoose, openaiApiKey })`
+
+Purpose:
+- To protect and route the Step 1 analysis request.
+
+Effect:
+- Request is forwarded to the MockTFL analysis service.
+
+Step 18: Backend Step 1 analysis service
+File:
+- backend/services/mocktfl/mockTflStartAnalysisService.js
+
+Function:
+- `startMockTflAnalysis({ studyNumber, pureTitle, mongoose, openaiApiKey })`
+
+Main logic:
+1. Create an embedding for `pureTitle`
+2. Match that embedding against saved SAP section title embeddings
+3. Read the matched SAP section text
+4. Reuse saved SAP metadata such as `matchedCrfFormName`
+5. Send the matched SAP section text to GPT
+6. Ask GPT to return the statistical variables needed for this MockTFL item
+
+Used APIs:
+- OpenAI Embeddings API
+- OpenAI Chat Completions API
+- MongoDB via `mongoose.connection.client`
+
+Databases involved:
+- `llxdocument.studies`
+- saved SAP state (`chunkType = "SAP"`)
+
+Purpose:
+- To determine which SAP section is most relevant and extract editable statistical variables from it.
+
+Effect:
+- Backend returns:
+  - matched SAP label
+  - matched SAP section text
+  - suggested statistical variables
+  - saved CRF form context
+
+Step 19: Dialog receives Step 1 result
+Files:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+
+Parent behavior:
+- Builds a temporary unsaved section snapshot in memory:
+  - `matchedSapLabel`
+  - `matchedSapSectionText`
+  - `suggestedVariablesText`
+  - `mappedCrfText = ""`
+  - `notesText = ""`
+  - `saved = false`
+- Sends:
+  `mocktfl:analysisStep1Result`
+
+Dialog behavior:
+- Displays:
+  - matched SAP section panel
+  - editable suggested variables panel
+  - Confirm Variables button
+- Hides mapping panel for now
+- Changes Start Analysis button text to:
+  `Re-analysis`
+
+Purpose:
+- To let the user review and edit GPT-suggested variables before CRF mapping happens.
+
+Effect:
+- The dialog transitions from blank/init state into editable analysis state.
+
+Step 20: User clicks Confirm Variables & Map to CRF
+Files:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Dialog behavior:
+- Reads the current variables textarea text
+- Sends:
+  `mocktfl:confirmVariables`
+- Includes:
+  - `variablesText`
+
+Parent behavior:
+- Validates allowlist again
+- Ensures Step 1 already ran and `pureTitle` exists
+- Sends dialog message:
+  `mocktfl:analysisStep2Running`
+- Calls frontend API:
+  `mapMockTflVariablesToCrf(...)`
+
+Purpose:
+- To map the user-confirmed variables, not the original raw GPT output, to CRF questions and answers.
+
+Effect:
+- The backend begins the MockTFL Step 2 analysis.
+
+Step 21: Frontend Confirm Variables API
+File:
+- frontend/src/taskpane/domains/mocktfl/api/mapVariablesToCrf.js
+
+Request:
+- `POST /api/mocktfl/map-variables-to-crf`
+
+Payload:
+- `studyNumber`
+- `type`
+- `number`
+- `pureTitle`
+- `variablesText`
+- `savedCrfFormName`
+
+Purpose:
+- To send the user-reviewed variable list back to the backend.
+
+Effect:
+- Backend begins CRF mapping for the current MockTFL item.
+
+Step 22: Backend Step 2 mapping route
+File:
+- backend/routes/mocktfl.routes.js
+
+Behavior:
+- Validates:
+  - `studyNumber`
+  - `pureTitle`
+  - confirmed variables presence
+  - database connectivity
+- Enforces the same analysis allowlist
+- Calls:
+  `mapMockTflVariablesToCrf(...)`
+
+Purpose:
+- To route and validate the second MockTFL analysis step.
+
+Effect:
+- Request moves into backend CRF mapping logic.
+
+Step 23: Backend Step 2 mapping service
+File:
+- backend/services/mocktfl/mockTflStartAnalysisService.js
+
+Function:
+- `mapMockTflVariablesToCrf({ studyNumber, pureTitle, variables, variablesText, savedCrfFormName, mongoose, openaiApiKey })`
+
+Main logic:
+1. Normalize the confirmed variables
+2. Recreate the embedding for `pureTitle`
+3. Resolve which CRF form should be used
+4. Prefer the CRF form name saved during SAP generation
+5. Fallback to CRF title-embedding match if necessary
+6. Match each confirmed variable to the best CRF question
+7. Gather the corresponding CRF answers/options
+8. Ask GPT to rewrite matched CRF questions into formal noun-phrase style table row headers
+
+Databases involved:
+- `llxdocument.studies`
+- CRF chunks (`chunkType = "crf_crfFormList"`)
+
+Used APIs:
+- OpenAI Embeddings API
+- OpenAI Chat Completions API
+- MongoDB via `mongoose.connection.client`
+
+Purpose:
+- To bridge the selected MockTFL item back to structured CRF data, while turning raw form questions into cleaner statistical row labels.
+
+Effect:
+- Backend returns:
+  - matched CRF form info
+  - question list
+  - detailed variable-to-question mappings
+
+Step 24: Parent converts raw CRF mappings into UI-ready text
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Functions used:
+- `groupCrfMappingsByQuestion(mappings)`
+- `formatGroupedMappingsForEvidence(groupedMappings)`
+- `formatGroupedMappingsForNotes(groupedMappings)`
+
+Behavior:
+- Groups multiple variables that map to the same CRF question
+- Builds one long evidence text block for the read-only mapping panel
+- Builds one simplified Notes text block for the final editor
+
+Purpose:
+- To ensure both evidence display and final Notes come from the same grouped source of truth.
+
+Effect:
+- The system avoids showing duplicated CRF questions across multiple variables.
+
+Step 25: Dialog receives Step 2 result
+Files:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+
+Parent behavior:
+- Updates the in-memory unsaved section snapshot:
+  - `matchedSapLabel`
+  - `matchedSapSectionText`
+  - `suggestedVariablesText`
+  - `mappedCrfText`
+  - `notesText`
+  - `saved = false`
+- Sends:
+  `mocktfl:analysisStep2Result`
+
+Dialog behavior:
+- Writes the generated final Notes text into the Notes textarea
+- Shows:
+  - mapping evidence panel
+  - Notes editor
+  - Insert / Clear / Close row
+- Marks:
+  - `mappingCompleted = true`
+- Re-enables buttons as appropriate
+
+Purpose:
+- To turn the full analysis pipeline result into something the user can inspect, refine, and insert.
+
+Effect:
+- The user sees:
+  - SAP evidence
+  - editable variables
+  - grouped CRF evidence
+  - ready-to-edit Notes text
+
+Step 26: User can edit Notes before insertion
+File:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+
+Behavior:
+- The Notes textarea remains fully editable.
+- Button availability depends on:
+  - whether analysis is required
+  - whether mapping has completed
+  - whether the Notes text is non-empty
+
+Purpose:
+- To keep the final wording under user control.
+
+Effect:
+- The final inserted result is a reviewed version, not an uneditable AI output.
+
+Step 27: User clicks Insert
+Files:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Dialog behavior:
+- Sends:
+  `mocktfl:insert`
+- Payload includes:
+  - `text` = current Notes textarea
+  - `selectedColumns` = checked column labels
+
+Parent behavior:
+- Reads `text`
+- Reads `selectedColumns`
+- Determines whether the item is in the structured table insertion allowlist
+
+Purpose:
+- To send the final user-approved Notes and column selection back to the parent controller.
+
+Effect:
+- The parent decides how to write the result into Word.
+
+Step 28: Structured table insertion for supported MockTFL tables
+Files:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+- frontend/src/taskpane/domains/mocktfl/word/tables/table14_1_1_2_patientDisposition.js
+- frontend/src/taskpane/domains/mocktfl/word/tables/table14_1_3_1_summaryOfDemographics.js
+
+Current supported table insert targets:
+- `TABLE 14.1.1.2`
+- `TABLE 14.1.3.1`
+
+Behavior:
+- If the item is a supported structured table target:
+  - For `14.1.1.2`, call:
+    `insertTable14_1_1_2_PatientDisposition({ studyNumber, text, selectedColumns })`
+  - For `14.1.3.1`, call:
+    `insertTable14_1_3_1_SummaryOfDemographics({ studyNumber, text, selectedColumns })`
+
+Inside these insertion functions:
+- Read line 3 of the title content control using:
+  `readMockTflTitleLine3(...)`
+- Build the target body content control tag
+- Find the target content control in Word
+- Parse the Notes text into table rows
+- Build a fixed-layout OOXML table
+- Clear the placeholder content control
+- Insert the OOXML table inside the content control
+- Append footnotes after the table
+
+Used APIs:
+- Office Word JavaScript API
+- `Word.run`
+- `contentControls.getByTag`
+- `clear`
+- `insertOoxml`
+- `insertParagraph`
+
+Purpose:
+- To replace the placeholder with a real Word table that follows MockTFL formatting rules.
+
+Effect:
+- The Word document shows a structured table with dynamic columns and footnotes.
+
+Step 29: Important current behavior for non-table-insert targets
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Current implementation detail:
+- The insert handler explicitly routes Word insertion only for the two allowlisted table targets.
+- For other MockTFL items, this dialog flow does not currently contain a separate plain-text Word write path in the insert branch.
+- However, the section snapshot is still saved to the database.
+
+Purpose:
+- This reflects the current prototype scope.
+
+Effect:
+- The full editor workflow is currently most complete for the two allowlisted tables.
+
+Step 30: Save the section snapshot after Insert
+Files:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflStateController.js
+- frontend/src/taskpane/domains/mocktfl/api/state.js
+- backend/routes/mocktfl.routes.js
+
+Behavior:
+- After insertion logic, the parent always calls:
+  `saveMockTflSectionSnapshot({ studyNumber, snapshot: {...} })`
+
+Snapshot content includes:
+- `type`
+- `number`
+- `label`
+- `notesText`
+- plus the current in-memory section data such as:
+  - matched SAP label
+  - matched SAP text
+  - suggested variables
+  - mapped CRF text
+
+Inside state controller:
+- Load existing MockTFL state
+- Merge the current section snapshot into `sectionsData`
+- Mark:
+  `saved = true`
+- Preserve:
+  - existing entries
+  - existing section snapshots
+  - global `drug1`
+  - global `drug2`
+- Save the full state via:
+  `POST /api/mocktfl/state`
+
+Purpose:
+- To persist the latest successful state of the current MockTFL section for later reopening.
+
+Effect:
+- The next time the user opens this same work item, the dialog can restore the saved content directly.
+
+Step 31: Dialog receives inserted confirmation
+Files:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+
+Behavior:
+- Parent sends:
+  `mocktfl:inserted`
+- Dialog updates status to:
+  `Inserted.`
+
+Purpose:
+- To give the user direct confirmation that the insert action completed.
+
+Effect:
+- User sees completion feedback in the dialog.
+
+Step 32: Clear behavior inside the dialog
+Files:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Dialog behavior:
+- Clicking Clear sends:
+  `mocktfl:clear`
+
+Parent behavior:
+- Resets:
+  - `currentAnalysisContext`
+  - `currentSavedSection`
+- Sends:
+  `mocktfl:cleared`
+
+Dialog response:
+- Clears SAP panels
+- Clears Notes
+- Resets button states
+- Changes Start Analysis text back to:
+  `Start analysis`
+
+Purpose:
+- To let the user discard the current in-dialog working state and start over for this item.
+
+Effect:
+- The dialog returns to a fresh state for that work item.
+
+Step 33: Close behavior inside the dialog
+Files:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Dialog behavior:
+- Clicking Close sends:
+  `mocktfl:close`
+- The dialog also tries:
+  `Office.context.ui.closeContainer()`
+
+Parent behavior:
+- Receives `mocktfl:close`
+- Calls:
+  `closeMockTflEditorDialog()`
+
+Purpose:
+- To properly end the current dialog session.
+
+Effect:
+- The dialog closes and the parent releases its dialog reference.
+
+Step 34: Error handling across the dialog workflow
+Files:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+
+Behavior:
+- The parent wraps each dialog-driven action in `try/catch`.
+- If any step fails, the parent sends:
+  `mocktfl:error`
+- The dialog then:
+  - restores button states if possible
+  - displays the error message in status
+
+Purpose:
+- To prevent the dialog from getting stuck in a disabled state when backend or Word operations fail.
+
+Effect:
+- The user sees a recoverable error message rather than a silent failure.
+
+APIs Used In The Open Editor Workflow
+
+Office / Dialog APIs
+- `Office.context.ui.displayDialogAsync`
+- `Office.context.ui.messageParent`
+- `Office.context.ui.addHandlerAsync`
+- `Office.EventType.DialogMessageReceived`
+- `Office.EventType.DialogParentMessageReceived`
+- `Office.EventType.DialogEventReceived`
+- `Office.context.ui.closeContainer`
+
+Office Word APIs
+- `Word.run`
+- `context.document.contentControls.getByTag`
+- `contentControl.select`
+- `contentControl.clear`
+- `contentControl.insertOoxml`
+- `range.load("text")`
+- `insertParagraph`
+- tab stops and paragraph formatting APIs
+
+Frontend-to-backend APIs
+- `GET /api/mocktfl/state`
+- `POST /api/mocktfl/start-analysis`
+- `POST /api/mocktfl/map-variables-to-crf`
+- `POST /api/mocktfl/state`
+
+OpenAI APIs
+- Embeddings API
+- Chat Completions API
+
+MongoDB data sources
+- `llxdocument.studies` with `chunkType = "MockTFL"`
+- `llxdocument.studies` with `chunkType = "SAP"`
+- `llxdocument.studies` with `chunkType = "crf_crfFormList"`
+
+What Open Editor Does Not Do
+The current Open Editor workflow does not:
+- support the full analysis prototype for all MockTFL items
+- guarantee a structured Word insertion path for all non-allowlisted items
+- automatically run analysis when the dialog opens
+- skip database loading; it always checks saved state first
+
+Current Limitations
+There are several implementation limitations in the current version:
+- Full analysis is currently gated to two tables only.
+- Structured table insertion is currently gated to the same two tables only.
+- Non-allowlisted items do not currently have an equally complete insert path inside this dialog controller.
+- The workflow depends on the earlier Insert Template step having already created the correct title/body content controls in Word.
+
+Summary
+The current MockTFL Open Editor logic is a dialog-based orchestration workflow.
+
+Its exact role is:
+- identify the selected MockTFL work item
+- open the item-specific dialog
+- read the real Word title content control as the source of truth
+- load saved section data from the database if it exists
+- load dynamic column options from global MockTFL state
+- optionally run Step 1 SAP matching and variable extraction
+- optionally run Step 2 CRF mapping
+- present evidence and final Notes to the user
+- insert structured output back into the correct Word body content control
+- save the finished section snapshot into the MockTFL database
+
+Most importantly, Open Editor is the bridge that connects the inserted Word placeholders, the AI analysis workflow, and the section-level persistence model.

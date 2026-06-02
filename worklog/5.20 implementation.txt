@@ -1,0 +1,46 @@
+5.20 Implementation (English)
+
+Overview
+- This file records the implementation work completed on May 20, focusing on troubleshooting the Azure remote R runner connection, fixing figure title truncation, and adding a tabular preview for generated mock data.
+
+Implementation 1: Fix Azure Remote R Runner 404 Error
+
+Goal
+- The "Auto Generate Data & Figure" feature was failing with an "HTTP 404" error when the Node.js backend tried to call the remote R runner hosted on Azure Container Apps.
+
+Main changes
+- Analyzed the backend API request path in `mockTflFigureService.js`.
+- Investigated the Azure Container App environment and discovered that the actual Plumber endpoint in the `r-runner` image is `/@post /run-figure`, not `/generate`.
+- Updated the `MOCKTFL_REMOTE_R_RUNNER_URL` environment variable in `backend/.env` to point to the correct endpoint path (`/run-figure`).
+
+Result
+- The local Node.js backend can now successfully send the generated R code to the Azure Container App and receive the plotted figure in Base64 format without encountering routing errors.
+
+
+Implementation 2: Prevent R Plot Title Truncation
+
+Goal
+- The auto-generated R plots had long titles that exceeded the image boundaries and were truncated because the base R `plot(main=...)` parameter does not auto-wrap text.
+
+Main changes
+- Modified `buildRCodeFromSpec()` in `backend/services/mocktfl/mockTflFigureAutoService.js`.
+- Added R code to wrap the title string using `strwrap(..., width = 56)`.
+- Replaced the inline `main` argument with a separate `title()` function call.
+- Increased the top margin of the plot using `par(mar = c(5, 5, 5.8, 2) + 0.1)` to ensure the multi-line title fits within the canvas.
+
+Result
+- Generated figures now correctly display long, multi-line titles without clipping the text off the top of the image.
+
+
+Implementation 3: Add Tabular Preview for Generated Mock Data
+
+Goal
+- The frontend MockTFL dialog only showed the raw JSON structure for the generated mock data, which is difficult for users to read quickly. A tabular format was needed to verify the mock data points.
+
+Main changes
+- Updated `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.html` to include a new section and a `<table>` element (`#figure-mock-data-table`) with CSS styling for a clean, readable table.
+- Added a `renderFigureMockDataTable(text)` function in `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js`.
+- Modified `setFigureMockDataText()` to dynamically parse the JSON payload (`timePoints` and `groupSeries`) and render the values into the HTML table headers and rows.
+
+Result
+- Users can now see a clear, structured table alongside the raw JSON and the image preview, making it much easier to review the generated synthetic data before inserting it into the Word document.

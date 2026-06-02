@@ -1,0 +1,759 @@
+Insert Template
+
+Overview
+This document explains the current MockTFL "Insert Template" logic in AI-for-Word. The purpose of this feature is to let the user choose which MockTFL items should be included in the working document, then generate a complete MockTFL document skeleton in Word. The generated skeleton includes front matter, divider pages, one title content control for each selected item, and one body placeholder content control for each selected item.
+
+This step is a document-structure generation step. It does not run GPT analysis, does not extract SAP variables, and does not insert final data tables. Instead, it prepares the Word document so later MockTFL steps can work against stable, tagged placeholders.
+
+End-to-End Purpose
+The feature solves the following problem:
+- The user needs a fast way to create a study-specific MockTFL working document.
+- The document needs consistent formatting and layout across all selected items.
+- Each selected table/figure/listing must have a stable target location in Word for later editing and table insertion.
+- Later steps such as Open Editor, Start Analysis, and Insert Table need reliable content control tags so they can find the correct work item again.
+
+High-Level Flow
+The current flow is:
+1. User selects a study.
+2. User switches the task to MockTFL.
+3. Frontend loads the MockTFL example entries from the reference database.
+4. Frontend renders all available MockTFL items as checkboxes.
+5. User may optionally click "Start Auto Selection" to auto-check recommended items.
+6. User manually reviews the checkboxes.
+7. User clicks "Insert Template".
+8. Frontend collects the selected entries.
+9. Frontend clears any existing MockTFL structure in Word.
+10. Frontend generates a fresh MockTFL document skeleton in Word.
+11. Frontend updates the taskpane UI so the user can continue to "Select drug comparison" and "Start working on".
+
+Important design note:
+- The actual insertion work is performed mainly in the frontend through Office Word JavaScript APIs.
+- The backend is used for reading the available MockTFL example entries and for optional auto-selection, but not for the actual Word insertion.
+
+Main Files Involved
+
+Frontend controller
+- frontend/src/taskpane/controller/appController.js
+
+Frontend selection logic
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflSelectionController.js
+
+Frontend reference API client
+- frontend/src/taskpane/domains/mocktfl/api/references.js
+
+Frontend auto-selection API client
+- frontend/src/taskpane/domains/mocktfl/api/autoSelect.js
+
+MockTFL document setup
+- frontend/src/taskpane/domains/mocktfl/word/mockTfl.js
+
+MockTFL full template generation
+- frontend/src/taskpane/domains/mocktfl/word/templateMockTfl.js
+
+Tag and content control helpers
+- frontend/src/taskpane/domains/mocktfl/word/constants.js
+- frontend/src/taskpane/domains/mocktfl/word/sections.js
+
+Front matter generators
+- frontend/src/taskpane/domains/mocktfl/word/titlePage.js
+- frontend/src/taskpane/domains/mocktfl/word/confidentiality.js
+- frontend/src/taskpane/domains/mocktfl/word/signaturePage.js
+- frontend/src/taskpane/domains/mocktfl/word/documentHistory.js
+- frontend/src/taskpane/domains/mocktfl/word/toc.js
+- frontend/src/taskpane/domains/mocktfl/word/divider.js
+- frontend/src/taskpane/domains/mocktfl/word/pageHeader.js
+
+Backend reference and auto-selection routes
+- backend/routes/references.routes.js
+- backend/routes/mocktfl.routes.js
+
+Detailed Logic
+
+Step 1: User switches Task to MockTFL
+File:
+- frontend/src/taskpane/controller/appController.js
+
+Behavior:
+- When the user changes the task selector to `MockTFL`, the application enters the MockTFL setup flow.
+- The controller checks that a study has already been selected.
+- It then starts loading the available MockTFL entries.
+
+What is called:
+- `loadMockTflEntries()`
+
+Purpose:
+- To read the list of all available MockTFL items that can be inserted into the Word document.
+
+Effect:
+- The taskpane prepares the checkbox list that the user will review before inserting the template.
+
+Step 2: Read available MockTFL entries from the reference database
+Files:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflSelectionController.js
+- frontend/src/taskpane/domains/mocktfl/api/references.js
+- backend/routes/references.routes.js
+
+Frontend behavior:
+- `loadMockTflEntries()` calls `getMockTflExampleEntries()`.
+- `getMockTflExampleEntries()` sends:
+  `GET /api/references/mocktfl-example`
+
+Backend behavior:
+- The route reads from:
+  Database: `References`
+  Collection: `MockTFL_Example`
+- The route returns an array of entries with:
+  - `order`
+  - `type`
+  - `number`
+  - `title`
+
+Purpose:
+- To provide a reference list of all possible MockTFL items.
+
+Effect:
+- The frontend receives structured entries such as tables, figures, and listings that the user can select.
+
+Important note:
+- This step does not read the current Word document.
+- It reads a central reference collection from MongoDB.
+
+Step 3: Render the checklist in the taskpane
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflSelectionController.js
+
+Function:
+- `renderMockTflChecklist({ containerEl, entries, onSelectionChange })`
+
+Behavior:
+- The function clears the checkbox container.
+- It loops through the MockTFL entries.
+- For each valid item, it creates:
+  - one checkbox
+  - one label
+- It writes the following data into DOM dataset attributes:
+  - `type`
+  - `title`
+  - `order`
+- The visible label is:
+  `TYPE NUMBER TITLE`
+
+Purpose:
+- To let the user manually choose which MockTFL items should be included in the new working document.
+
+Effect:
+- The user sees a selectable checklist of candidate tables/figures/listings.
+
+Why the dataset fields matter:
+- The later "Insert Template" step reads the selected values directly from the checkbox dataset.
+- This avoids re-querying the backend when the user clicks the button.
+
+Step 4: Enable the Insert Template button only when needed
+Files:
+- frontend/src/taskpane/controller/appController.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflSelectionController.js
+
+Behavior:
+- Every checkbox change triggers `updateInsertTemplateEnabled()`.
+- For MockTFL mode, the app calls:
+  `updateMockTflInsertTemplateEnabled(dom.sectionCheckboxList, dom.btnInsertTemplate)`
+- That function reads all checked boxes by calling:
+  `getSelectedMockTflEntries(containerEl)`
+- If no items are selected, the button stays disabled.
+- If one or more items are selected, the button becomes enabled.
+
+Purpose:
+- To prevent inserting an empty MockTFL template with no sections.
+
+Effect:
+- The user can only click "Insert Template" after at least one MockTFL item is selected.
+
+Step 5: Optional auto-selection before insertion
+Files:
+- frontend/src/taskpane/controller/appController.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflSelectionController.js
+- frontend/src/taskpane/domains/mocktfl/api/autoSelect.js
+- backend/routes/mocktfl.routes.js
+
+Behavior:
+- If the user clicks `Start Auto Selection`, the frontend calls:
+  `runMockTflAutoSelection({ studyNumber, entries: mockTflEntries })`
+- That function sends:
+  `POST /api/mocktfl/auto-select-sections`
+- The backend uses the study and the available MockTFL entries to return a recommendation list.
+- The frontend then calls:
+  `applyAutoSelection(containerEl, recommended)`
+- That function checks or unchecks checkboxes based on the backend response.
+
+Purpose:
+- To give the user an intelligent starting point before manual review.
+
+Effect:
+- The checkbox list is pre-filled with recommended selections.
+
+Important note:
+- Auto-selection is optional.
+- The final inserted set still depends on what remains checked when the user clicks `Insert Template`.
+
+Step 6: MockTFL mode also prepares the Word document environment
+Files:
+- frontend/src/taskpane/controller/appController.js
+- frontend/src/taskpane/domains/mocktfl/word/mockTfl.js
+
+Behavior:
+- During MockTFL task setup, the app calls:
+  `setupMockTflDocument()`
+- This function uses `Word.run(...)`.
+- It clears the document body with:
+  `context.document.body.clear()`
+- It loads all sections in the Word document.
+- It sets each section orientation to:
+  `Word.PageOrientation.landscape`
+
+Purpose:
+- To switch the working document into a MockTFL-friendly layout before detailed work starts.
+
+Effect:
+- The Word document body is emptied.
+- The page orientation becomes landscape across the document.
+
+Important note:
+- This is an early document-preparation step.
+- The same layout preparation is also effectively enforced again later during full template generation.
+
+Step 7: User clicks Insert Template
+File:
+- frontend/src/taskpane/controller/appController.js
+
+Behavior:
+- The button handler checks the current task.
+- In MockTFL mode it calls:
+  `getSelectedMockTflEntries(dom.sectionCheckboxList)`
+- If nothing is selected, it returns immediately.
+- Otherwise it calls:
+  `insertMockTflTemplate(selected)`
+
+Purpose:
+- To convert the checked checklist items into a generated Word template.
+
+Effect:
+- The app starts the actual insertion flow.
+
+Step 8: Collect the selected MockTFL entries
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflSelectionController.js
+
+Function:
+- `getSelectedMockTflEntries(containerEl)`
+
+Behavior:
+- The function reads all checked checkboxes from the container.
+- For each checked item, it builds a structured object:
+  - `type`
+  - `number`
+  - `title`
+  - `order`
+- It filters out invalid rows.
+- It sorts the result by:
+  - `order`
+  - then `type`
+  - then `number`
+
+Purpose:
+- To convert the UI checkbox state into stable structured data for template generation.
+
+Effect:
+- The later insertion logic receives a clean list of selected entries instead of raw DOM state.
+
+Step 9: Main insertion controller starts the template generation flow
+File:
+- frontend/src/taskpane/controller/appController.js
+
+Function:
+- `insertMockTflTemplate(selectedEntries)`
+
+Behavior:
+- The function first validates:
+  - current study exists
+  - `selectedEntries` is a non-empty array
+- It updates the status text to:
+  `Clearing existing Mock TFL template...`
+- It calls:
+  `clearMockTflTemplate()`
+- Then it updates the status text to:
+  `Inserting Mock TFL placeholders...`
+- It calls:
+  `generateMockTflTemplate({ studyNumber: currentStudy, entries: selectedEntries })`
+
+Purpose:
+- To coordinate the complete replacement of the current MockTFL skeleton with a freshly generated one.
+
+Effect:
+- The Word document is cleared of old MockTFL placeholders and rebuilt from the selected entries.
+
+Step 10: Clear existing MockTFL content controls
+File:
+- frontend/src/taskpane/domains/mocktfl/word/templateMockTfl.js
+
+Function:
+- `clearMockTflTemplate()`
+
+Behavior:
+- The function reads all content controls from the document.
+- It loads each content control tag.
+- It filters only the content controls whose tags start with:
+  - `mocktfl-title:`
+  - `mocktfl-body:`
+- It deletes them in reverse order.
+
+Related helper file:
+- frontend/src/taskpane/domains/mocktfl/word/constants.js
+
+Tag helpers:
+- `TAG_PREFIX_MOCKTFL_TITLE`
+- `TAG_PREFIX_MOCKTFL_BODY`
+- `buildMockTflTitleTag(...)`
+- `buildMockTflBodyTag(...)`
+
+Purpose:
+- To remove the previous MockTFL placeholder structure before creating a new one.
+
+Effect:
+- Old MockTFL title/body content controls are removed.
+
+Important note:
+- This function only targets MockTFL title/body content controls by tag.
+- Later, the document body is also fully cleared again in the full-generation path, so this step acts as an additional cleanup layer.
+
+Step 11: Normalize and sort the selected entries
+File:
+- frontend/src/taskpane/domains/mocktfl/word/templateMockTfl.js
+
+Functions:
+- `normalizeEntries(entries)`
+- `groupByType(entries)`
+
+Behavior:
+- `normalizeEntries`:
+  - trims and standardizes fields
+  - uppercases `type`
+  - removes incomplete items
+  - sorts by type order, then order, then number
+- Type order is:
+  - TABLE
+  - FIGURE
+  - LISTING
+- `groupByType` then groups the entries by those types.
+
+Purpose:
+- To make the generated document order deterministic and professionally structured.
+
+Effect:
+- The final Word output follows a stable and predictable order no matter which order the user clicked the checkboxes.
+
+Step 12: Rebuild the Word document from scratch
+Files:
+- frontend/src/taskpane/domains/mocktfl/word/templateMockTfl.js
+- frontend/src/taskpane/domains/mocktfl/word/mockTfl.js
+
+Behavior:
+- `generateMockTflTemplate(...)` calls:
+  `setupMockTflDocument()`
+- This clears the body and sets the document to landscape orientation.
+
+Purpose:
+- To guarantee that the final MockTFL document starts from a clean, standardized base.
+
+Effect:
+- Any remaining body content is removed.
+- The document is ready for front matter and MockTFL item placeholders.
+
+Step 13: Generate front matter pages
+File:
+- frontend/src/taskpane/domains/mocktfl/word/templateMockTfl.js
+
+Function:
+- `generateMockTflFrontMatter({ studyNumber })`
+
+Behavior:
+- The function inserts the following pages in order:
+  1. Title Page
+  2. Confidentiality Statement
+  3. Signature Page
+  4. Document History
+  5. Table of Contents placeholder
+- It inserts a page break after each section.
+
+Purpose:
+- To make the generated MockTFL file look like a structured formal deliverable rather than a loose set of placeholders.
+
+Effect:
+- The document starts with a full front matter block before the actual TFL body items begin.
+
+Step 14: Insert the title page
+File:
+- frontend/src/taskpane/domains/mocktfl/word/titlePage.js
+
+Function:
+- `insertMockTflTitlePage(body, { protocolNo = "Protocol no. ANT-007" } = {})`
+
+Behavior:
+- Inserts centered title page paragraphs for:
+  - report title
+  - report subtitle
+  - study description text
+  - version
+  - date
+  - protocol number
+  - submitted-to company
+  - prepared-by vendor
+
+Purpose:
+- To create the first page of the MockTFL package.
+
+Effect:
+- The user sees a complete title page instead of an empty document start.
+
+Important limitation:
+- Much of this content is still hardcoded example text in the current implementation.
+- The `studyNumber` passed into the generation flow is not yet fully used to dynamically populate the title page.
+
+Step 15: Insert the confidentiality statement page
+File:
+- frontend/src/taskpane/domains/mocktfl/word/confidentiality.js
+
+Function:
+- `insertConfidentialityStatement(body)`
+
+Behavior:
+- Inserts a title line and one confidentiality paragraph.
+
+Purpose:
+- To provide the standard confidential-document page expected in a formal TFL package.
+
+Effect:
+- The generated document includes a dedicated confidentiality page.
+
+Step 16: Insert the signature page
+File:
+- frontend/src/taskpane/domains/mocktfl/word/signaturePage.js
+
+Function:
+- `insertMockTflSignaturePage(body)`
+
+Behavior:
+- Inserts a page title.
+- Draws a horizontal rule.
+- Inserts multiple signature blocks such as:
+  - Prepared by
+  - Reviewed by
+- Each signature block uses tables to simulate signature lines and date lines.
+
+Purpose:
+- To reproduce the structure of a formal approval/signature page.
+
+Effect:
+- The document includes realistic signature placeholders.
+
+Step 17: Insert the document history page
+File:
+- frontend/src/taskpane/domains/mocktfl/word/documentHistory.js
+
+Function:
+- `insertDocumentHistory(body)`
+
+Behavior:
+- Inserts a "DOCUMENT HISTORY" heading.
+- Inserts a 4-column table with:
+  - Date
+  - Version
+  - Reason for Update
+  - Update Summary
+- Adds multiple empty body rows.
+
+Purpose:
+- To provide a blank version history area that can be filled later.
+
+Effect:
+- The generated document contains a standard document history section.
+
+Step 18: Insert the Table of Contents placeholder
+File:
+- frontend/src/taskpane/domains/mocktfl/word/toc.js
+
+Function:
+- `insertMockTflTableOfContents(body, tocItems = [])`
+
+Behavior:
+- Inserts the heading:
+  `TABLE OF CONTENTS`
+- Inserts a content control placeholder tagged as:
+  `mocktfl-toc-placeholder`
+- The placeholder text says the TOC will be generated or filled later.
+
+Purpose:
+- To reserve a stable location for the TOC without forcing final TOC generation at template-insert time.
+
+Effect:
+- The document contains a TOC page placeholder.
+
+Important note:
+- Although `toc.js` also contains a `buildTocItems(entries)` helper for page calculations, the current template insertion flow does not use it to build a final TOC.
+- The current implementation inserts a TOC placeholder, not a fully populated TOC.
+
+Step 19: Start generating the TFL body pages
+File:
+- frontend/src/taskpane/domains/mocktfl/word/templateMockTfl.js
+
+Behavior:
+- After front matter is inserted, the generator loops over the non-empty type groups in this order:
+  - TABLE
+  - FIGURE
+  - LISTING
+- For each type group, it inserts a divider page first.
+
+Purpose:
+- To organize the MockTFL body into visually separated sections.
+
+Effect:
+- Tables, figures, and listings each begin with their own labeled divider page.
+
+Step 20: Insert a divider page for each non-empty type
+File:
+- frontend/src/taskpane/domains/mocktfl/word/divider.js
+
+Function:
+- `insertDividerPage(body, text)`
+
+Behavior:
+- Inserts several blank lines.
+- Inserts one large centered label such as:
+  - `TABLES`
+  - `FIGURES`
+  - `LISTINGS`
+- Inserts more blank lines to center the label visually.
+
+Purpose:
+- To mirror the traditional section divider pages seen in formal TFL packages.
+
+Effect:
+- The generated MockTFL body is visually grouped by type.
+
+Step 21: Insert one title block for each selected item
+File:
+- frontend/src/taskpane/domains/mocktfl/word/templateMockTfl.js
+
+Behavior:
+- For each selected entry, the generator creates a title paragraph.
+- The title is formatted into:
+  - line 1: `TYPE NUMBER`
+  - line 2: title main text
+  - line 3: last 3 words of the title if available
+- It uses soft line breaks inside one paragraph so Word still treats it as one heading block.
+- The paragraph is styled as Heading 1, then visually overridden to:
+  - centered
+  - Courier New
+  - bold
+  - size 8
+
+Purpose:
+- To create a visually standardized title area for each MockTFL item while preserving Word heading semantics.
+
+Effect:
+- Each selected table/figure/listing gets a consistent title block that looks like the desired MockTFL format.
+
+Why the 3-line structure matters:
+- The heading remains machine-readable.
+- Later logic can read line 2 and line 3 separately if needed.
+- The semantic part of the title can later be extracted for embedding and SAP matching.
+
+Step 22: Wrap the title paragraph in a title content control
+Files:
+- frontend/src/taskpane/domains/mocktfl/word/templateMockTfl.js
+- frontend/src/taskpane/domains/mocktfl/word/constants.js
+
+Behavior:
+- After inserting the title paragraph, the code wraps that paragraph in a content control.
+- The title content control receives:
+  - a structured tag from `buildMockTflTitleTag({ studyNumber, type, number })`
+  - a readable title value
+
+Purpose:
+- To give each MockTFL title a stable machine-locatable identity.
+
+Effect:
+- Later workflows can retrieve the exact title block for a given work item.
+
+Why this matters for later steps:
+- `Open Editor` can read the title from Word rather than assuming the database title is the source of truth.
+- If the user edits the title inside Word, later analysis can still use the actual document content.
+
+Step 23: Insert one body placeholder content control for each selected item
+Files:
+- frontend/src/taskpane/domains/mocktfl/word/templateMockTfl.js
+- frontend/src/taskpane/domains/mocktfl/word/constants.js
+
+Behavior:
+- After the title block, the generator inserts an empty paragraph.
+- It then inserts another paragraph and wraps that range in a body content control.
+- The body content control receives:
+  - a structured tag from `buildMockTflBodyTag({ studyNumber, type, number })`
+  - a readable title
+  - placeholder text:
+    `Type your notes here...`
+
+Purpose:
+- To create the future insertion target for that work item's body content.
+
+Effect:
+- Every selected MockTFL item now has a dedicated body placeholder in Word.
+
+Why this is critical:
+- Later editor insertion does not guess where to write.
+- It finds the correct body content control by tag and inserts the notes or final OOXML table there.
+- This is the core structural link between "Insert Template" and all later MockTFL work.
+
+Step 24: Add page breaks between items
+File:
+- frontend/src/taskpane/domains/mocktfl/word/templateMockTfl.js
+
+Behavior:
+- After each entry, the generator usually inserts a page break.
+- The logic avoids an unnecessary final page break only at the very end.
+
+Purpose:
+- To keep each MockTFL item on its own page.
+
+Effect:
+- The generated document has a clean one-item-per-page style layout.
+
+Step 25: Configure page headers after all content is generated
+File:
+- frontend/src/taskpane/domains/mocktfl/word/pageHeader.js
+
+Function:
+- `setupMockTflPageHeader(context, protocolNumber = "ANT-007")`
+
+Behavior:
+- Loads all Word document sections.
+- Sets:
+  `differentFirstPageHeaderFooter = true`
+- Clears each primary header.
+- Inserts a 2x2 invisible table into the header.
+- Fills the header with:
+  - company name
+  - protocol number
+  - page number field
+  - total pages field
+
+Purpose:
+- To apply a consistent formal header across the MockTFL package while keeping the first page separate.
+
+Effect:
+- The title page stays visually different.
+- Remaining pages show company/protocol/page header information.
+
+Important limitation:
+- The current protocol number default is still hardcoded as `ANT-007` unless changed by future work.
+
+Step 26: Update taskpane state after insertion succeeds
+File:
+- frontend/src/taskpane/controller/appController.js
+
+Behavior:
+- After successful insertion:
+  - `insertedMockTflEntries` is set to the selected entries
+  - `setMockTflWorkItemOptions(dom.sectionSelect, selectedEntries)` populates the "Start working on" dropdown
+  - the section-selection UI is hidden
+  - the `drugComparisonRow` is shown
+  - the section dropdown row is shown
+  - the `Open Editor` row is shown
+  - the save row is shown
+- The status becomes:
+  `Mock TFL template ready.`
+
+Purpose:
+- To move the user from template setup into the next working phase.
+
+Effect:
+- The user no longer sees the checklist workflow.
+- The user now sees the workflow for:
+  - Select drug comparison
+  - Choose a specific work item
+  - Open the editor
+
+Step 27: Populate the "Start working on" dropdown from the inserted items
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflSelectionController.js
+
+Function:
+- `setMockTflWorkItemOptions(selectEl, entries)`
+
+Behavior:
+- Clears the dropdown.
+- Inserts one option per selected entry in sorted order.
+- The option value is:
+  `TYPE:NUMBER`
+- The option label is:
+  `TYPE NUMBER TITLE`
+
+Purpose:
+- To ensure the next-stage work item selector only includes items actually inserted into the current document.
+
+Effect:
+- The user can only open editors for items that already exist in Word.
+
+Step 28: How Insert Template supports later Open Editor and Start Analysis logic
+Files:
+- frontend/src/taskpane/domains/mocktfl/word/constants.js
+- frontend/src/taskpane/domains/mocktfl/word/sections.js
+
+Relevant later functions:
+- `readMockTflTitle({ studyNumber, type, number })`
+- `extractPureTitleFromMockTflTitleCcText(titleCcText)`
+- `selectMockTflBody({ studyNumber, type, number })`
+
+Why this matters:
+- The template insertion step creates the exact content controls these later functions depend on.
+- `readMockTflTitle(...)` reads the title content control text by tag.
+- `extractPureTitleFromMockTflTitleCcText(...)` strips away the `TABLE 14.x` prefix and extracts the semantic title for embedding.
+- `selectMockTflBody(...)` locates and selects the body placeholder content control for later writing.
+
+Purpose:
+- Insert Template establishes the structural contract that the rest of MockTFL follows.
+
+Effect:
+- Later steps can reliably read titles, match SAP sections, and replace placeholder content with tables or notes.
+
+What Insert Template Does Not Do
+The current Insert Template feature does not:
+- call GPT
+- analyze SAP
+- extract statistical variables
+- map anything to CRF
+- generate the final data table contents
+- automatically save the MockTFL state to the database
+- build a final populated TOC page with true page-number entries
+
+Current Limitations
+There are several implementation limitations in the current version:
+- The title page content is still mostly hardcoded example text.
+- The protocol number used in page headers is still hardcoded by default.
+- The TOC page is currently only a placeholder content control.
+- The document is cleared early during MockTFL setup and then effectively cleared again during actual template generation.
+
+Summary
+The current MockTFL Insert Template logic is a structured Word-document generation workflow.
+
+Its exact role is:
+- read available MockTFL reference entries
+- let the user select which items should be included
+- optionally auto-select recommended items
+- clear the current document and standardize layout
+- generate front matter pages
+- generate type divider pages
+- generate one title content control and one body content control for each selected item
+- apply page headers
+- move the UI into the next MockTFL working stage
+
+Most importantly, Insert Template creates the tagged content control skeleton that every later MockTFL feature depends on.

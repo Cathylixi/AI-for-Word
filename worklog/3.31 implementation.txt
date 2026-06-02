@@ -1,0 +1,110 @@
+3.31 Implementation (English)
+
+Overview
+- This file records the implementation work completed on 3.31, focusing on transforming the MockTFL module into a two-step human-in-the-loop workflow, rewriting CRF questions into formal statistical headers, refining Word table formatting, and fixing backend payload limits.
+
+Implementation 1: Two-Step MockTFL Analysis Workflow with Editable Variables
+
+Goal
+- To allow users to verify and modify AI-suggested statistical variables before mapping them to CRF questions, preventing black-box execution and ensuring accuracy.
+
+Main changes
+- Split the monolithic `startAnalysis` backend API into two steps: `startMockTflAnalysis` (Step 1) and `mapMockTflVariablesToCrf` (Step 2).
+- Updated the frontend dialog UI to hide Step 2 results initially.
+- Made the "Suggested statistical variables" text area editable.
+- Added a "Confirm Variables & Map to CRF" button that triggers Step 2 using the user's edited variables.
+- Removed the deprecated "GPT Drafting guidance" feature completely from backend prompts and frontend UI to streamline the workflow.
+
+Result
+- The user now has a "Human-in-the-loop" experience. They can review and adjust variables in the editor before hitting confirm, ensuring the subsequent CRF mapping is based on vetted data.
+
+
+Implementation 2: GPT Smart Rewriting for CRF Questions
+
+Goal
+- To convert raw, conversational CRF questions (e.g., "Was treatment completed?", "If Yes, specify...") into formal, professional statistical noun phrases (e.g., "Completed Study Treatment") suitable for MockTFL table headers.
+
+Main changes
+- Added a new `rewriteCrfQuestionsForMockTfl` backend function that calls GPT-4o-mini after CRF matching.
+- Designed a strict prompt with rules and few-shot examples requiring GPT to output only noun phrases, stripping question words, question marks, and form-filling instructions.
+- Modified the frontend `mockTflWorkController` to format and display both the `[Original]` and `[Rewritten]` questions in the evidence box for transparency.
+- Updated the `Notes (Content Control)` editor to populate exclusively with the clean, `[Rewritten]` text.
+
+Result
+- Extracted CRF questions are now automatically cleaned up into professional statistical jargon. Users can verify the AI's rewriting logic in the evidence box, while the bottom editor receives ready-to-insert table headers.
+
+
+Implementation 3: Unified Data Source and Grouped Display Logic
+
+Goal
+- To prevent duplicate matched CRF questions from cluttering the UI and to ensure the `Notes` editor formatting perfectly mirrors the grouped evidence box.
+
+Main changes
+- Created a `groupCrfMappingsByQuestion` helper function in the frontend controller.
+- This function groups multiple suggested variables that map to the exact same CRF question into a single block.
+- Refactored both the evidence box formatter and the `Notes` editor formatter to use this single, grouped data source.
+- Stripped unnecessary prefixes like `[Start analysis results]` and `Title:` from the `Notes` output.
+
+Result
+- The UI is much cleaner. If variables 1, 2, and 3 all map to the same question, they are displayed together. The `Notes` editor is now directly derived from this grouped result, ensuring absolute consistency between the two UI panels.
+
+
+Implementation 4: Advanced Word Table Formatting (OOXML)
+
+Goal
+- To meet precise professional formatting standards for inserted Word tables, specifically regarding line spacing and option indentation, which are difficult to achieve with basic Office.js APIs.
+
+Main changes
+- Completely rewrote `parseMockTflEditorText.js` to intelligently parse the editor text into "Question", "Option", and "Blank" blocks.
+- Added a `__INDENT__` marker for parsed option lines.
+- Modified `tableOoxml.js` to detect the `__INDENT__` marker and apply native Word paragraph indentation (`<w:ind w:left="288" />`, equivalent to 0.2 inches).
+- Injected `<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/>` into all table cells to eliminate default paragraph spacing and create a tight, professional look.
+
+Result
+- Inserted tables now look highly professional. Sub-options are clearly indented relative to their parent headers, and rows have tight spacing, perfectly mimicking standard MockTFL document styling.
+
+
+Implementation 5: Backend Payload and Stability Fixes
+
+Goal
+- To resolve a JSON parsing error (`PayloadTooLargeError`) that occurred when attempting to save large SAP documents to the database.
+
+Main changes
+- Increased the `express.json` payload limit in `backend/server.js` from the default 100kb to `50mb`.
+- Added a custom JSON error-handling middleware to catch `entity.too.large` and syntax errors to prevent the server from returning unhandled HTML error pages.
+- Enhanced the frontend `apiPost` client to gracefully handle and report non-JSON responses.
+
+Result
+- Large SAP documents can now be saved to the database successfully without crashing the server or throwing confusing HTML parse errors in the frontend.
+
+
+Implementation 6: MockTFL Section-Level Database State with Saved Flag
+
+Goal
+- To store MockTFL editor results at the section level, so each work item can track whether its four analysis text boxes have already been saved and can be reloaded directly when opening the editor.
+
+Main changes
+- Replaced the old MockTFL section text save model with a new `sectionsData` array in the MockTFL database state.
+- Added a `saved` flag to each section record to distinguish between placeholder sections (`saved=false`) and completed Insert results (`saved=true`).
+- Updated `handleSaveMockTfl` so the main "Save to Database" action creates or preserves section placeholders with `saved=false`.
+- Updated the MockTFL editor Insert flow so it saves the current work item's four formatted text boxes (`matchedSap`, `suggestedVariables`, `mappedCrf`, and `notes`) into the matching `sectionsData` record and sets `saved=true`.
+- Updated `Open Editor` logic so it checks the current section in database first: if `saved=true`, the dialog opens directly with the four text boxes filled from database; otherwise, it falls back to the original step-by-step Start Analysis workflow.
+- Updated `MockTFL_Database_Structure.txt` to document the new `sectionsData` schema and `saved` semantics.
+
+Result
+- MockTFL now has a clean section-level persistence model. Users can save selected work items before analysis, and once a section is inserted, the four editor text boxes are stored in database and can be re-opened directly for that same section later.
+
+
+Implementation 7: Lightweight Re-analysis Entry for Saved MockTFL Sections
+
+Goal
+- To let users re-run the full MockTFL analysis workflow from a saved section without deleting the previously saved database snapshot until a new Insert is completed.
+
+Main changes
+- Updated `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js` to reuse the existing top analysis button as a dual-purpose entry point.
+- Added dynamic button text switching so the button shows `Start analysis` for fresh sections and `Re-analysis` for sections loaded from saved database content.
+- Changed the saved-section dialog state so the analysis button remains visible after loading `saved=true` data, allowing users to restart the full Step 1 -> Step 2 flow directly from the editor.
+- Kept the existing `mocktfl:startAnalysis` workflow unchanged so re-analysis clears the current dialog state, rebuilds analysis context, and only overwrites database data after the user finishes the new run and clicks `Insert`.
+
+Result
+- Users can now open a previously saved MockTFL section, review the existing four text boxes, and click `Re-analysis` to restart the full human-in-the-loop process. The old saved database result remains intact unless the new run is explicitly inserted and saved.

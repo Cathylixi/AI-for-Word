@@ -1,0 +1,162 @@
+MockTFL Start Analysis 3.5 - Implementation (English)
+
+Overview
+- This worklog captures the MockTFL "Start analysis" implementation that connects MockTFL, saved SAP state, and CRF context into one unified workflow.
+- The implementation started from the original 3.5 plan and was then extended with additional functionality:
+  - GPT-suggested statistical variables,
+  - CRF mappings based on those suggested variables,
+  - updated MockTFL editor UI panels to display the new results.
+
+Summary
+- Implemented a unified MockTFL start analysis flow on the backend.
+- The backend now:
+  - embeds the pure MockTFL title once,
+  - matches the best saved SAP section for the study,
+  - reuses SAP-saved CRF form metadata when available,
+  - extracts CRF questions,
+  - asks GPT for suggested statistical variables,
+  - maps suggested statistical variables back to CRF questions and answers.
+- Updated the MockTFL editor UI so users can now see:
+  - matched SAP section text,
+  - suggested statistical variables,
+  - mapped CRF questions and answers for those suggested variables.
+- Kept the existing Notes box prepend behavior unchanged for now.
+- Kept the existing table insertion prototype unchanged for now.
+
+Detailed implementation
+
+Goal
+- Extend MockTFL "Start analysis" so it uses both CRF and saved SAP context.
+- Preserve the existing user flow in the Notes box while adding richer read-only analysis outputs.
+- Keep the feature behind the current prototype allowlist.
+
+Implemented scope
+- Study-specific matching against saved SAP state:
+  - Source: `llxdocument.studies`
+  - Filter: `{ studyNumber, chunkType: "SAP" }`
+  - Match target: `data.entries[].title_embedding`
+- Use cosine similarity to match the MockTFL title embedding against all saved SAP section title embeddings.
+- Resolve the matched section text from `data.sections[]` by `sectionNumber`.
+- Reuse the saved SAP matched CRF form name when possible to stabilize downstream CRF matching.
+- Use GPT to analyze the matched SAP text for the current MockTFL context.
+
+Design principles
+- Keep SAP and MockTFL logic separated by domain files.
+- Reuse one title embedding per Start analysis run to avoid duplicate embedding calls.
+- Keep the current table insert prototype untouched until the output model is validated.
+- Add concise, complete English comments in all new or changed code.
+
+Backend implementation
+1) Unified MockTFL Start Analysis orchestrator
+   - File: `backend/services/mocktfl/mockTflStartAnalysisService.js`
+   - Implemented responsibilities:
+     - embed pure MockTFL title once,
+     - CRF branch:
+       - match against `chunkType=crf_crfFormList` title embeddings,
+       - extract `LabelForm.question_part.text`,
+       - build normalized CRF question candidates with answer options,
+     - SAP branch:
+       - read the saved SAP state for the study,
+       - match against `data.entries[].title_embedding`,
+       - select the highest-score section,
+       - resolve section text from `data.sections[]`,
+     - GPT analysis branch:
+       - return `statisticalVariables`,
+       - normalize/deduplicate model output,
+       - format outputs into numbered text blocks for UI display.
+
+2) CRF matching improvement
+   - The service now first tries to reuse `matchedCrfFormName` stored in the saved SAP section metadata.
+   - If that lookup fails, it falls back to CRF title-embedding matching.
+   - This keeps the pipeline more stable and avoids noisy CRF re-matching when saved SAP metadata is already available.
+
+3) Statistical variable to CRF mapping
+   - GPT-suggested statistical variables are parsed into numbered items.
+   - Those items are embedded and matched against candidate CRF question embeddings.
+   - The backend returns:
+     - matched CRF question,
+     - answer options,
+     - raw value text,
+     - raw multiline value text.
+
+4) Unified API endpoint
+   - File: `backend/routes/mocktfl.routes.js`
+   - Implemented `POST /api/mocktfl/start-analysis`
+   - Kept the feature gate for:
+     - `TABLE 14.1.1.2`
+     - `TABLE 14.1.3.1`
+   - Request body:
+     - `{ studyNumber, type, number, pureTitle }`
+   - Response now includes:
+     - `crf.matched`
+     - `crf.questions`
+     - `crf.mappings`
+     - `sap.matched`
+     - `sap.sectionText`
+     - `sap.statisticalVariablesText`
+
+Frontend implementation
+5) Unified frontend API wrapper
+   - File: `frontend/src/taskpane/domains/mocktfl/api/startAnalysis.js`
+   - Uses `POST /api/mocktfl/start-analysis`
+   - Keeps the frontend call path simple and aligned with the backend unified flow.
+
+6) MockTFL controller flow
+   - File: `frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js`
+   - On `mocktfl:startAnalysis`:
+     - read title content control text from Word,
+     - extract the pure title,
+     - call `startMockTflAnalysis(...)`,
+     - keep the existing CRF question prepend block in the Notes box,
+     - also send the following payload to the dialog:
+       - `sapMatchedLabel`
+       - `sapSectionText`
+       - `sapStatisticalVariablesText`
+       - `crfMappings`
+
+7) Dialog UI update
+   - File: `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.html`
+   - Added read-only text areas for:
+     - matched SAP section text,
+     - suggested statistical variables,
+     - mapped CRF questions and answers for suggested variables.
+
+8) Dialog JS rendering
+   - File: `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js`
+   - Added render helpers for:
+     - matched SAP section text,
+     - suggested statistical variables text,
+     - mapped CRF QA text,
+     - clearing all analysis panels on reset.
+   - On analysis result:
+     - keep the current notes prepend behavior unchanged,
+     - render the new SAP/MockTFL analysis outputs into the additional read-only panels.
+
+Current behavior
+- The top editable Notes textbox is still generated from the CRF question list:
+  - title,
+  - matched CRF form,
+  - extracted CRF questions.
+- Suggested statistical variables are shown in their own dedicated read-only section.
+- Mapped CRF QA is now driven by the suggested statistical variables, not by the older generic SAP analysis bullets.
+- Insert behavior for the prototype tables is still based on the existing `analysisQuestions` payload.
+
+Behavior rules
+- If no saved SAP state exists:
+  - return a clear backend error instructing the user to save SAP first.
+- If saved SAP entries do not contain title embeddings:
+  - return a clear backend error instructing the user to save SAP to database first so embeddings are created.
+- Keep the existing table insertion logic unchanged.
+
+Verification
+1) Frontend build completed successfully with webpack.
+2) Start analysis in `TABLE 14.1.1.2`:
+   - verified that the Notes box still receives the CRF question block,
+   - verified that the matched SAP section box is populated,
+   - verified that suggested statistical variables are returned,
+   - verified that mapped CRF QA is rendered.
+3) Backend dependency behavior:
+   - clear DB/SAP-state dependency errors are still returned when required inputs are missing.
+4) Insert/Clear/Close behavior:
+   - existing dialog interactions were kept unchanged at the flow level.
+

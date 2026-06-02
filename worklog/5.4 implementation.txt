@@ -1,0 +1,83 @@
+5.4 Implementation (English)
+
+Overview
+- This file records the implementation work completed on 5.4, focusing on documenting the existing PDF Bookmark tool, creating a new Combine PDF GUI tool, packaging it as a standalone executable, and improving the combine logic to preserve existing PDF bookmarks.
+
+Implementation 1: PDF Bookmark Project Documentation
+
+Goal
+- Understand the existing `pdf bookmark` project structure and create a root-level README that explains the architecture, overall workflow, and file responsibilities.
+
+Main changes
+- Reviewed the `pdf bookmark` project, including its `implementation` source code, GUI layer, core processing modules, utility modules, documentation, and packaged `PDF_Bookmark_Tool` output.
+- Created a root-level `README.md` under `pdf bookmark`.
+- Rewrote the README in English after initially drafting it in Chinese.
+- Documented the project structure, execution flow, development run steps, packaging steps, and the role of each major file.
+
+Result
+- The `pdf bookmark` folder now has a clear English README that explains how the tool works and how its files are organized.
+
+
+Implementation 2: Combine PDF GUI Tool
+
+Goal
+- Build a new GUI tool similar in structure to `pdf bookmark`, but with a simpler workflow: the user selects a folder, and the tool combines all PDF files in that folder into one file named `combined_pdf.pdf`.
+
+Main changes
+- Created a new project under `Combine pdf`.
+- Added an `implementation` folder with `main.py`, `requirements.txt`, `build.bat`, `.gitignore`, and package folders for `ui`, `core`, and `utils`.
+- Implemented `core/pdf_scanner.py` to scan PDF files in the selected folder and sort them using natural file-name order, so `2.pdf` comes before `10.pdf`.
+- Implemented `core/pdf_combiner.py` to combine PDFs into `combined_pdf.pdf` in the selected folder.
+- Implemented `ui/main_window.py` using Tkinter, including folder selection, a `Combine PDFs` button, log output, background threading, and overwrite confirmation.
+- Added shared models in `utils/models.py` and logging helpers in `utils/logger.py`.
+- Added a root-level `README.md` for the Combine PDF tool.
+
+Result
+- The new Combine PDF tool can be run from source with `python main.py`. Users can select a folder and combine all PDFs inside it into one output file.
+
+
+Implementation 3: Standalone Packaging
+
+Goal
+- Package the Combine PDF tool in the same style as `pdf bookmark/PDF_Bookmark_Tool`, so it can be launched directly without running Python manually.
+
+Main changes
+- Used PyInstaller to build the GUI app as `Combine_pdf_tool`.
+- Generated the packaged output under `implementation/dist/Combine_pdf_tool`.
+- Copied the packaged folder to the root-level `Combine_pdf_tool` directory.
+- Confirmed the packaged folder contains `Combine_pdf_tool.exe` and `_internal`.
+- Updated `build.bat` and README references so future builds use the same `Combine_pdf_tool` name.
+
+Result
+- Users can now run the packaged application by double-clicking `Combine_pdf_tool/Combine_pdf_tool.exe`.
+
+
+Implementation 4: GitHub Push Planning
+
+Goal
+- Plan how to connect the local `Combine pdf` folder to the GitHub repository `https://github.com/Cathylixi/Combine-PDF-tool.git` and push the project.
+
+Main changes
+- Explained the Git workflow for initializing a local repository, setting the main branch, adding the GitHub remote, committing files, and pushing to GitHub.
+- Noted the difference between committing only source code versus also committing the packaged executable and `_internal` folder.
+- Recommended keeping source code in GitHub and optionally distributing the executable through GitHub Releases.
+
+Result
+- A clear command sequence was provided for connecting the local project to GitHub and pushing the initial commit.
+
+
+Implementation 5: Preserve PDF Bookmarks During Combine
+
+Goal
+- Fix the issue where PDFs with existing bookmarks lost those bookmarks after being combined.
+
+Main changes
+- Reviewed `core/pdf_combiner.py` and identified that the original implementation used `writer.add_page(page)` in a loop, which copied only page content and did not preserve PDF outlines/bookmarks.
+- Updated the combine logic to use `PdfWriter.append(pdf_path, import_outline=True)`.
+- Added a `preserve_bookmarks` parameter to `combine_pdfs`, defaulting to `True`.
+- Updated the Combine PDF README to mention that existing PDF bookmarks/outlines are preserved when possible.
+- Rebuilt the packaged `Combine_pdf_tool` executable and replaced the root-level packaged folder.
+- Verified the change with temporary PDFs containing bookmarks and confirmed that the combined output preserved the original bookmark titles.
+
+Result
+- The Combine PDF tool now preserves existing PDF bookmarks/outlines when possible while still combining PDFs in natural file-name order.

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI-for-Word</title>
+
+    <!-- Office JavaScript API -->
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+
+    <!-- Fluent UI Core (可选) -->
+    <link
+      rel="stylesheet"
+      href="https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/office-ui-fabric-core/11.1.0/css/fabric.min.css"
+    />
+  </head>
+
+  <body class="ms-font-m ms-Fabric">
+    <section id="sideload-msg" style="padding: 12px;">
+      <h3>Please sideload this Word add-in</h3>
+      <p>After loading, the initial page will appear here automatically.</p>
+    </section>
+
+    <main id="app-body" style="display:none; padding: 12px;">
+      <style>
+        .row { margin-bottom: 12px; }
+        .label { display:block; font-weight: 600; margin-bottom: 6px; }
+        select, textarea {
+          width: 100%;
+          padding: 8px;
+          border: 1px solid #ddd;
+          border-radius: 6px;
+          font-family: inherit;
+          font-size: 13px;
+        }
+        textarea { min-height: 110px; resize: vertical; }
+        .hint { font-size: 12px; color: #666; margin-top: 6px; }
+        .actions { display:flex; gap: 8px; margin-top: 8px; }
+        button {
+          padding: 6px 10px;
+          border: 1px solid #ddd;
+          border-radius: 6px;
+          background: #fff;
+          cursor: pointer;
+          font-size: 13px;
+        }
+        button.primary { background:#106ebe; color:#fff; border-color:#106ebe; }
+        .status { font-size: 12px; color:#999; margin-top: 8px; }
+        
+        /* Modal styles */
+        .modal-overlay {
+          position: fixed;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(0,0,0,0.4);
+          display: none;
+          justify-content: center;
+          align-items: center;
+          z-index: 1000;
+        }
+        .modal {
+          background: #fff;
+          padding: 20px;
+          border-radius: 8px;
+          max-width: 80%;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .modal-title { font-weight: bold; margin-bottom: 10px; font-size: 14px; }
+        .modal-body { margin-bottom: 15px; color: #333; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .spinner {
+          width: 18px;
+          height: 18px;
+          border: 2px solid #ddd;
+          border-top-color: #106ebe;
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+          display: inline-block;
+          vertical-align: middle;
+          margin-right: 8px;
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      </style>
+
+      <h2 style="margin: 0 0 8px 0;">AI-for-Word</h2>
+
+      <div class="row">
+        <span class="label">Study Number</span>
+        <select id="study-select">
+          <option value="">Loading...</option>
+        </select>
+      </div>
+
+      <div class="row" id="task-row" style="display:none;">
+        <span class="label">Task</span>
+        <select id="task-select">
+          <option value="">Select a task...</option>
+          <option value="SAP">SAP</option>
+          <option value="MockTFL">Mock TFL</option>
+        </select>
+      </div>
+
+      <div class="row" id="select-mode-row" style="display:none;">
+        <span class="label">Start selecting SAP section</span>
+        <select id="select-mode">
+          <option value="">Select...</option>
+          <option value="start">Start selecting</option>
+        </select>
+      </div>
+
+      <div class="row" id="section-selection-row" style="display:none;">
+        <span class="label">SAP sections</span>
+        <div id="section-checkbox-list" style="max-height: 220px; overflow:auto; border:1px solid #ddd; border-radius:6px; padding:8px;"></div>
+        <div class="actions" style="margin-top: 10px;">
+          <button id="btn-auto-select" class="primary">Start Auto Selection</button>
+          <button id="btn-insert-template" disabled>Insert Template</button>
+        </div>
+      </div>
+
+      <div class="row" id="drug-comparison-row" style="display:none;">
+        <span class="label">Select drug comparison</span>
+        <div style="display: flex; gap: 10px; margin-bottom: 8px;">
+          <div style="flex: 1;">
+            <label for="drug-1-input" style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">Drug 1</label>
+            <input type="text" id="drug-1-input" placeholder="e.g. Abelacimab" style="width: 100%; box-sizing: border-box;" />
+          </div>
+          <div style="flex: 1;">
+            <label for="drug-2-input" style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">Drug 2</label>
+            <input type="text" id="drug-2-input" placeholder="e.g. Apixaban" style="width: 100%; box-sizing: border-box;" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top: 8px;">
+          <button id="btn-extract-drug-comparison" class="primary">Extract Drug Comparison</button>
+          <button id="btn-save-drug-comparison">Save Comparison</button>
+        </div>
+      </div>
+
+      <div class="row" id="section-row" style="display:none;">
+        <span class="label">Start working on</span>
+        <select id="section-select">
+          <option value="">Select a section...</option>
+        </select>
+      </div>
+
+      <div class="row" id="ai-row" style="display:none;">
+        <span class="label">AI text generation</span>
+        <button id="btn-ai" disabled>Generate with AI</button>
+      </div>
+
+      <div class="row" id="open-editor-row" style="display:none;">
+        <button id="btn-open-editor" class="primary" disabled>Open Editor</button>
+      </div>
+
+      <div class="row" id="finish-row" style="display:none;">
+        <button id="btn-finish-sap" class="primary" disabled>Finish ALL SAP content</button>
+      </div>
+
+      <div class="row" id="editor-row" style="display:none;">
+        <span class="label">Section notes</span>
+        <textarea id="section-editor" placeholder="Type here to update the selected section..."></textarea>
+      </div>
+
+      <div class="row" id="titlepage-row" style="display:none;">
+        <div id="titlepage-editor-root"></div>
+      </div>
+
+      <div class="actions" id="action-row" style="display:none;">
+        <button id="btn-insert" class="primary" disabled>Insert</button>
+        <button id="btn-clear" disabled>Clear</button>
+      </div>
+
+      <div class="row" id="save-row" style="display:none; margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
+        <button id="btn-save-db" style="width: 100%;">Save to Database</button>
+      </div>
+
+      <div id="status" class="status"></div>
+      <div id="host-info" class="status" style="display:none;"></div>
+
+      <!-- Restore Confirmation Modal -->
+      <div id="restore-modal" class="modal-overlay">
+        <div class="modal">
+          <div class="modal-title">Recover SAP Content?</div>
+          <div class="modal-body">
+            Found a previously saved draft for this study (<span id="restore-date"></span>).<br/>
+            Would you like to restore it? This will clear the current document.
+          </div>
+          <div class="modal-actions">
+            <button id="btn-restore-yes" class="primary">Restore</button>
+            <button id="btn-restore-no">Start new</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Restore Progress Modal -->
+      <div id="restore-progress-modal" class="modal-overlay">
+        <div class="modal">
+          <div class="modal-title">Restoring...</div>
+          <div class="modal-body">
+            <span class="spinner"></span>
+            <span id="restore-progress-text">Preparing...</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

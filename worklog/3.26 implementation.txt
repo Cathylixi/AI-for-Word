@@ -1,0 +1,77 @@
+3.26 Implementation (English)
+
+Overview
+- This file records the MockTFL-related implementation work completed on 3.26.
+- The work on this date has two parts:
+  1. simplify the SAP analysis output;
+  2. revise the `Open Editor -> Start analysis` workflow in MockTFL.
+
+Implementation 1
+- Goal:
+  - Remove the redundant `GPT drafting guidance` output and keep only `Suggested statistical variables`.
+
+- Main changes:
+  - `backend/services/mocktfl/mockTflStartAnalysisService.js`
+    - Refined the GPT prompt so the model returns only short statistical-variable phrases.
+    - Removed `writingGuidance` / `analysisText` related parsing and return fields.
+  - `frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js`
+    - Stopped reading and passing drafting-guidance data to the dialog.
+  - `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.html`
+    - Removed the drafting-guidance UI block.
+  - `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js`
+    - Removed the drafting-guidance rendering / clearing logic.
+
+- Result:
+  - The MockTFL editor became simpler.
+  - The SAP analysis area now focuses on:
+    - matched SAP section text;
+    - suggested statistical variables;
+    - mapped CRF questions and answers.
+
+Implementation 2
+- Goal:
+  - Change the `Open Editor -> Start analysis` flow into a two-step human-in-the-loop workflow.
+  - Let the user edit the suggested statistical variables before CRF mapping starts.
+
+- New logic:
+  1. User clicks `Start analysis`.
+  2. Backend only runs SAP matching + GPT variable extraction.
+  3. Dialog shows:
+     - `Matched SAP section`
+     - editable `Suggested statistical variables`
+     - `Confirm Variables and Map to CRF` button
+  4. User can add / delete / modify the variables.
+  5. After user confirms, backend maps the confirmed variables to CRF questions and answers.
+  6. Dialog then shows `Mapped CRF questions and answers for suggested variables`.
+
+- Main changes:
+  - `backend/services/mocktfl/mockTflStartAnalysisService.js`
+    - Split the previous one-step flow into:
+      - `startMockTflAnalysis` for step 1;
+      - `mapMockTflVariablesToCrf` for step 2.
+    - Added helper logic to parse the user-confirmed variable text back into structured items.
+  - `backend/routes/mocktfl.routes.js`
+    - Kept `/api/mocktfl/start-analysis` for step 1.
+    - Added `/api/mocktfl/map-variables-to-crf` for step 2.
+  - `frontend/src/taskpane/domains/mocktfl/api/mapVariablesToCrf.js`
+    - Added a new frontend API wrapper for the second-step request.
+  - `frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js`
+    - Added separate handling for:
+      - step 1 result;
+      - user-confirm action;
+      - step 2 result.
+  - `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.html`
+    - Made the variables textarea editable.
+    - Added the confirm button.
+    - Added show/hide structure for the SAP / variables / mapping panels.
+  - `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js`
+    - Added UI state handling for the two-step workflow.
+    - Disabled table insert until the confirm-and-map step is finished.
+
+- Result:
+  - The user can now review GPT output before CRF mapping.
+  - CRF mapping is based on the final user-confirmed variables, not directly on the first GPT output.
+
+Verification
+- Checked the touched frontend and backend files after the changes.
+- Verified no new linter errors were introduced in the edited files.

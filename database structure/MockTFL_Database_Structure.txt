@@ -1,0 +1,52 @@
+MockTFL Database Structure
+
+Collection: `llxdocument.studies`
+Query Condition: `{ studyNumber: "<STUDY_ID>", chunkType: "MockTFL" }`
+
+Structure of `data` field:
+{
+  "saved": true,
+  "lastSavedAt": "2026-03-31T11:00:00.000Z",
+  "schemaVersion": 3,
+  "drug1": "EOquin",   // Extracted from SAP
+  "drug2": "Placebo",  // Extracted from SAP
+
+  // 1. Selected MockTFL templates
+  "entries": [
+    {
+      "type": "TABLE",
+      "number": "14.1.1.2",
+      "title": "Patient Disposition",
+      "label": "TABLE 14.1.1.2 Patient Disposition"
+    }
+  ],
+
+  // 2. Sections Data (includes format and analysis process)
+  // This array stores section-level editor state for each MockTFL work item.
+  // - `saved=false`: placeholder exists, but no completed Insert result yet
+  // - `saved=true`: the 4 editor text boxes were saved after Insert
+  "sectionsData": [
+    {
+      "key": "TABLE:14.1.1.2",
+      "type": "TABLE",
+      "number": "14.1.1.2",
+      "saved": true,
+
+      // Box 1: Matched SAP section
+      "matchedSapLabel": "3.2.1 Patient disposition",
+      "matchedSapSectionText": "The primary reason for treatment discontinuation...",
+
+      // Box 2: Suggested statistical variables (User confirmed / editable text)
+      "suggestedVariablesText": "1. Discontinuation reasons\n2. Completion status",
+
+      // Box 3: Mapped CRF questions and answers for suggested variables (Grouped mapped evidence text)
+      "mappedCrfText": "[Original]: Primary reason...\n[Rewritten]: Reasons for Early Study Treatment Discontinuation\nAnswers/Options:\n- Adverse Event\n...",
+
+      // Box 4: Notes (Content Control) - Final notes text actually used for insert
+      "notesText": "Reasons for Early Study Treatment Discontinuation\n- Adverse Event\n- Non Compliance",
+
+      // Timestamp for when this specific section was last inserted/saved
+      "updatedAt": "2026-03-31T11:05:00.000Z"
+    }
+  ]
+}

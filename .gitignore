@@ -1,0 +1,31 @@
+# Environment and API keys
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.cert
+*.crt
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build output
+dist/
+build/
+.next/
+
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.DS
+
+# Python (if applicable)
+__pycache__/
+*.pyc
+venv/
+.venv/
+env/

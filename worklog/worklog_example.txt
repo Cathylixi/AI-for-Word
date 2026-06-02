@@ -1,0 +1,30 @@
+[Date] Implementation (English)
+
+Overview
+- [Provide a concise 1-2 sentence summary of all the major changes made on this date. For example: "This file records the implementation work completed on [Date], focusing on rewriting the MockTFL insertion logic and refining Word table styling."]
+
+Implementation 1: [Short Title of the Feature/Fix]
+
+Goal
+- [What was the core problem or requirement? Why did we make this change? Keep it focused on the business or technical motivation.]
+
+Main changes
+- [Bullet point 1: Specific backend or frontend logic change. E.g., Added function `X` in `backend/services/...` to handle Y.]
+- [Bullet point 2: Specific UI or data structure change. E.g., Modified `mockTflEditorDialog.html` to include a new button.]
+- [Bullet point 3: Keep descriptions technical but high-level and clear.]
+
+Result
+- [What is the final outcome from the user's or system's perspective? How does the application behave differently now?]
+
+
+Implementation 2: [Short Title of Another Feature/Fix]
+
+Goal
+- [Motivation...]
+
+Main changes
+- [Change 1...]
+- [Change 2...]
+
+Result
+- [Outcome...]

@@ -1,0 +1,367 @@
+Select Drug Comparison
+
+Overview
+This document explains the current "Select drug comparison" logic in the AI-for-Word MockTFL workflow. The purpose of this feature is to extract the main treatment comparison from the saved SAP, display the result in two separate inputs ("Drug 1" and "Drug 2"), allow the user to review or edit the values, save them into the MockTFL database state, and then reuse them as dynamic table column options in the MockTFL editor.
+
+End-to-End Purpose
+The feature solves the following problem:
+- MockTFL tables should not use hardcoded arm names.
+- The system should read the study-specific SAP content and infer the treatment comparison.
+- The user should still be able to manually review and edit the extracted values.
+- The saved drug names should be reusable across MockTFL sections for column selection.
+
+Main UI Elements
+The "Select drug comparison" section is currently shown in the main taskpane after the user inserts the MockTFL template.
+
+The UI contains:
+- A text input for Drug 1
+- A text input for Drug 2
+- An "Extract Drug Comparison" button
+- A "Save Comparison" button
+
+High-Level Flow
+The current flow is:
+1. User selects MockTFL and inserts the MockTFL template.
+2. The taskpane displays the "Select drug comparison" section.
+3. User clicks "Extract Drug Comparison".
+4. Frontend sends the current study number to the backend.
+5. Backend reads the saved SAP state from the database.
+6. Backend finds the Introduction or Background SAP section.
+7. Backend sends that section text to GPT and requests structured JSON output.
+8. Backend returns drug1 and drug2.
+9. Frontend writes drug1 into the Drug 1 input and drug2 into the Drug 2 input.
+10. User may manually edit the two values.
+11. User clicks "Save Comparison".
+12. Frontend saves drug1 and drug2 into the global MockTFL database state.
+13. When the user later opens a MockTFL editor, those saved values are reused as dynamic column options together with "Overall".
+
+Detailed Logic
+
+Step 1: When the section becomes visible
+File:
+- frontend/src/taskpane/controller/appController.js
+
+Function:
+- insertMockTflTemplate(selectedEntries)
+
+Behavior:
+- After the user selects MockTFL sections and clicks "Insert Template", the system clears any old MockTFL template from Word.
+- It then inserts the selected MockTFL placeholders into the Word document.
+- After insertion is completed, the taskpane shows the row `drugComparisonRow`.
+- This is the moment when the "Select drug comparison" UI becomes visible.
+
+Important note:
+- The drug comparison inputs are not shown before MockTFL template insertion.
+- This keeps the workflow aligned with the intended sequence: insert template first, then define comparison, then open editor.
+
+Step 2: Loading previously saved values when MockTFL is selected
+File:
+- frontend/src/taskpane/controller/appController.js
+
+Behavior:
+- When the user switches the task selector to MockTFL, the app loads the MockTFL state from the database by calling `loadMockTflState({ studyNumber })`.
+- If the response contains `data.drug1`, it is written into the Drug 1 input.
+- If the response contains `data.drug2`, it is written into the Drug 2 input.
+
+This means:
+- The system does not force GPT extraction every time.
+- Previously saved drug names can be loaded back into the UI automatically.
+- The user can continue using or editing the saved values.
+
+Step 3: Clicking "Extract Drug Comparison"
+Files:
+- frontend/src/taskpane/controller/appController.js
+- frontend/src/taskpane/domains/mocktfl/api/drugComparison.js
+
+Frontend behavior:
+- The button click handler first checks whether a study is selected.
+- It updates the status message to indicate that SAP analysis is running.
+- It temporarily disables the extract button to prevent duplicate clicks.
+- It then calls:
+  `extractDrugComparison({ studyNumber: currentStudy })`
+
+API client behavior:
+- The API client sends a POST request to:
+  `/api/mocktfl/drug-comparison`
+- The payload contains only:
+  `{ studyNumber }`
+
+Important note:
+- At this point, the frontend does not try to interpret SAP text.
+- The frontend only forwards the study number and waits for structured backend results.
+
+Step 4: Backend route for extraction
+File:
+- backend/routes/mocktfl.routes.js
+
+Route:
+- POST /api/mocktfl/drug-comparison
+
+Behavior:
+- The route validates that `studyNumber` exists.
+- The route checks whether MongoDB is connected.
+- The route calls:
+  `extractDrugComparisonFromSap({ studyNumber, mongoose, openaiApiKey })`
+- The route returns:
+  `{ success: true, ...result }`
+
+Important note:
+- The route itself does not contain the extraction logic.
+- It is only a transport layer between frontend and service logic.
+
+Step 5: Reading SAP from the database
+File:
+- backend/services/mocktfl/mockTflStartAnalysisService.js
+
+Function:
+- extractDrugComparisonFromSap({ studyNumber, mongoose, openaiApiKey })
+
+Database source:
+- Database: `llxdocument`
+- Collection: `studies`
+- Query condition:
+  `studyNumber = current study`
+  `chunkType = "SAP"`
+
+Behavior:
+- The service loads the saved SAP state from the database.
+- It expects the SAP document to contain `data.sections`.
+- If there is no saved SAP state, it throws an error telling the user to save SAP first.
+- If the sections array is missing or empty, it throws an error.
+
+Important note:
+- This feature does not read the current Word document directly.
+- It depends on the SAP having already been saved to the database.
+
+Step 6: Choosing which SAP section to analyze
+File:
+- backend/services/mocktfl/mockTflStartAnalysisService.js
+
+Behavior:
+- The service scans the SAP sections and looks for a title containing:
+  - "INTRODUCTION"
+  - or "BACKGROUND"
+- If such a section is found, that section is used.
+- If not, the service falls back to the first SAP section.
+
+Reason:
+- The trial comparison is most likely to be described in the Introduction or Background section.
+- The fallback to the first section is a defensive measure so the feature does not fail immediately if the SAP headings are non-standard.
+
+Step 7: Extracting the text sent to GPT
+File:
+- backend/services/mocktfl/mockTflStartAnalysisService.js
+
+Behavior:
+- The service reads the selected section body from:
+  `introSection.text`
+- If that is empty, it falls back to:
+  `introSection.content`
+- The final line is:
+  `String(introSection?.text || introSection?.content || "").trim()`
+
+Reason:
+- Some saved SAP structures may use `text`.
+- Some may use `content`.
+- Supporting both fields makes the extraction more robust.
+
+Failure behavior:
+- If neither field contains usable text, the service throws:
+  "Found SAP Introduction section, but the text is empty."
+
+Step 8: GPT prompt design
+File:
+- backend/services/mocktfl/mockTflStartAnalysisService.js
+
+Behavior:
+- The service builds a prompt that tells GPT:
+  - You are a clinical trial biostatistician.
+  - Read SAP Introduction / Background text.
+  - Identify the drugs or treatment groups being compared.
+  - Find the two main drugs or treatment groups.
+  - If a single active drug is compared with placebo, use "Placebo" as the second item.
+  - Return only valid JSON with exactly this shape:
+    {"drug1":"...","drug2":"..."}
+  - Do not return markdown, code fences, or explanatory text.
+
+Why this matters:
+- The previous design used a single free-text string such as "Drug A vs Drug B".
+- The current design is intentionally stricter because the UI and database now need two separate structured values.
+
+Step 9: OpenAI call behavior
+File:
+- backend/services/mocktfl/mockTflStartAnalysisService.js
+
+Behavior:
+- The service creates an OpenAI client using the backend API key.
+- It uses the configured chat model, defaulting to `gpt-4o-mini`.
+- It sends:
+  - one system message
+  - one user message containing the prompt
+- It uses a low temperature (`0.1`) to reduce randomness.
+- It also uses:
+  `response_format: { type: "json_object" }`
+
+Why this matters:
+- The prompt requests JSON.
+- The API parameter also enforces JSON object output.
+- Together, these two controls reduce the risk of malformed free-text responses.
+
+Step 10: Parsing GPT output
+File:
+- backend/services/mocktfl/mockTflStartAnalysisService.js
+
+Behavior:
+- The service reads:
+  `completion?.choices?.[0]?.message?.content`
+- It then passes the returned text through:
+  `parseJsonObjectFromText(text)`
+
+Parsed fields:
+- `parsed.drug1`
+- `parsed.drug2`
+
+Current fallback behavior:
+- If `parsed.drug1` is missing or empty, the service returns "Drug 1"
+- If `parsed.drug2` is missing or empty, the service returns "Drug 2"
+
+Returned object:
+- drug1
+- drug2
+- matchedSapSectionNumber
+- matchedSapSectionTitle
+
+Important note:
+- If the user sees "Drug 1" and "Drug 2" in the UI, that is not a true extracted comparison.
+- That means the backend fallback values were used.
+
+Step 11: Writing the result into the UI
+File:
+- frontend/src/taskpane/controller/appController.js
+
+Behavior:
+- After the API returns, the frontend writes:
+  - `result.drug1` into the Drug 1 input
+  - `result.drug2` into the Drug 2 input
+- If the returned value is empty, the frontend also falls back to:
+  - "Drug 1"
+  - "Drug 2"
+
+Status message:
+- The taskpane status changes to:
+  "Drug comparison extraction complete. Please review and save."
+
+Meaning:
+- GPT extraction is treated as a suggestion, not a final locked value.
+- The user is expected to review the two values before saving.
+
+Step 12: Manual editing by the user
+Behavior:
+- The two drug inputs are ordinary editable text inputs.
+- The user can replace the extracted values with manually corrected values.
+- No additional parsing is performed on the frontend before saving.
+
+This is important because:
+- The user may want cleaner labels than GPT returns.
+- The user may want to standardize naming before those values become table columns.
+
+Step 13: Clicking "Save Comparison"
+Files:
+- frontend/src/taskpane/controller/appController.js
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflStateController.js
+
+Frontend behavior:
+- The save button reads:
+  - `dom.drug1Input.value`
+  - `dom.drug2Input.value`
+- It calls:
+  `saveMockTflDrugComparison({ studyNumber, drug1, drug2 })`
+
+State controller behavior:
+- The controller first loads the existing MockTFL state from the database.
+- It preserves:
+  - existing entries
+  - existing sectionsData
+- It rebuilds the full state using:
+  - the old entries
+  - the old sectionsData
+  - the new drug1
+  - the new drug2
+- It then saves the full state back to the database.
+
+Important note:
+- Drug comparison is stored at the global MockTFL state level.
+- It is not stored inside an individual section snapshot.
+
+Step 14: Current database structure
+Relevant file:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflStateController.js
+
+Current global fields in MockTFL state:
+- saved
+- lastSavedAt
+- entries
+- sectionsData
+- schemaVersion
+- drug1
+- drug2
+
+Meaning:
+- `drug1` and `drug2` belong to the whole study-level MockTFL state.
+- They are shared inputs for later MockTFL work.
+
+Step 15: Reusing saved comparison values in the MockTFL editor
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Behavior when the user opens a MockTFL editor:
+- The dialog loads the current MockTFL state from the database.
+- It constructs:
+  `availableColumns = [state.drug1, state.drug2, "Overall"].filter(Boolean)`
+
+Important note:
+- The system no longer parses a free-text string like "Drug A vs Drug B".
+- It directly uses the structured values saved in the database.
+
+Result:
+- The editor can render dynamic checkbox options using:
+  - saved Drug 1
+  - saved Drug 2
+  - Overall
+
+Step 16: Why this structure is better than the old "A vs B" text
+Benefits of the current design:
+- No fragile string parsing is required.
+- The UI is clearer because each drug has its own field.
+- The database stores structured values rather than one ambiguous sentence.
+- The editor can build dynamic columns directly from saved data.
+- User correction is simpler and safer.
+
+Step 17: Relationship to the later table generation
+The saved drug comparison values are not only for display.
+They are later used as the source of truth for dynamic table columns in MockTFL table generation.
+
+In practice:
+- User saves Drug 1 and Drug 2
+- User opens a MockTFL work item
+- Editor receives available columns from saved state
+- User checks which columns to include
+- Table generation uses the checked values as column headers
+
+Summary
+The current "Select drug comparison" function works as a study-level preparation step for MockTFL generation.
+
+Its exact role is:
+- read saved SAP from the database
+- extract the main treatment comparison using GPT
+- split the result into two separate editable values
+- save those values globally in MockTFL state
+- reuse those saved values as dynamic column options in MockTFL editors and Word table generation
+
+Current Limitation
+At present, if GPT output is missing or parsing fails, the backend returns fallback values:
+- "Drug 1"
+- "Drug 2"
+
+This means those labels may appear even when real extraction did not succeed.
+So those fallback values should be understood as placeholders, not validated study results.

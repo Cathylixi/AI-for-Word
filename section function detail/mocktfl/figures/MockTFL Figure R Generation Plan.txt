@@ -1,0 +1,141 @@
+MockTFL Figure R Generation Plan
+
+Overview
+This document describes the implementation plan for supporting the first MockTFL Figure workflow, starting with FIGURE 14.2.1.1. The goal is to keep Figure handling at the same work-item level as TABLE 14.1.1.2, while using a reusable R-code-to-image pipeline instead of creating a separate hardcoded Word drawing file for every figure.
+
+Target User Flow
+1. The user selects a study number.
+2. The user selects the MockTFL task.
+3. The user inserts the MockTFL template.
+4. The user selects FIGURE 14.2.1.1 from the "Start working on" dropdown.
+5. The taskpane selects the matching Figure body Content Control in Word.
+6. The user clicks Open Editor.
+7. The MockTFL editor opens in Figure mode.
+8. The dialog shows an R code editor.
+9. The user pastes or edits R code.
+10. The user clicks Generate Figure.
+11. The frontend sends the R code to the backend.
+12. The backend runs Rscript, generates a PNG, converts it to Base64, and sends it back.
+13. The dialog previews the generated image.
+14. The user clicks Insert.
+15. The frontend inserts the generated image into the correct MockTFL body Content Control in Word.
+16. The section snapshot saves the R code and generated image into MockTFL state.
+
+Main Files to Add
+
+1. Backend Figure Service
+Path:
+- backend/services/mocktfl/mockTflFigureService.js
+
+Purpose:
+- Execute user-provided R code through Rscript.
+- Wrap the R code in a PNG output device.
+- Read the generated PNG file.
+- Return the image as Base64.
+- Clean up temporary R and PNG files.
+
+Important Details:
+- Use the operating system temporary directory.
+- Generate unique file names for each request.
+- Use child_process.execFile instead of shell string execution.
+- Apply a timeout so a long-running R script does not hang the backend.
+- Return stdout and stderr for troubleshooting.
+- Clean up temporary files in a finally block.
+- Support a remote Azure R Runner by setting `MOCKTFL_FIGURE_RUNNER=remote` and `MOCKTFL_REMOTE_R_RUNNER_URL`.
+
+2. Frontend Figure API
+Path:
+- frontend/src/taskpane/domains/mocktfl/api/generateFigure.js
+
+Purpose:
+- Provide a small API wrapper for POST /api/mocktfl/generate-figure.
+- Send studyNumber, type, number, and rCodeText.
+- Return the generated Base64 PNG payload to the controller.
+
+3. Word Figure Insertion Helper
+Path:
+- frontend/src/taskpane/domains/mocktfl/word/figures/insertFigure.js
+
+Purpose:
+- Find the target MockTFL body Content Control by tag.
+- Clear its placeholder content.
+- Insert the generated PNG image from Base64.
+
+Important Details:
+- This helper should be generic for all MockTFL figures.
+- It should not hardcode FIGURE 14.2.1.1.
+- The selected work item should be resolved through studyNumber, type, and number.
+
+Main Files to Modify
+
+1. Backend Routes
+Path:
+- backend/routes/mocktfl.routes.js
+
+Change:
+- Add POST /api/mocktfl/generate-figure.
+- Validate studyNumber, type, number, and rCodeText.
+- Keep an allowlist for the current prototype target:
+  - FIGURE:14.2.1.1
+- Call mockTflFigureService.generateMockTflFigureFromRCode.
+
+2. MockTFL Work Controller
+Path:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Change:
+- Add a Figure allowlist for FIGURE 14.2.1.1.
+- Import the Figure API wrapper.
+- Import the Word figure insertion helper.
+- Add a dialog message handler for mocktfl:generateFigure.
+- Store the latest R code and generated Base64 image in currentSavedSection.
+- On mocktfl:insert, if the selected item is a Figure target, insert the image into Word and save the section snapshot.
+
+3. MockTFL Editor Dialog HTML
+Path:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.html
+
+Change:
+- Add a Figure workflow panel.
+- Include:
+  - R Code label
+  - R code textarea
+  - Generate Figure button
+  - Preview image area
+  - Insert / Clear / Close buttons for the Figure workflow
+
+4. MockTFL Editor Dialog JS
+Path:
+- frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js
+
+Change:
+- Detect whether the current work item is a Figure.
+- Hide table analysis UI in Figure mode.
+- Show the Figure R editor panel in Figure mode.
+- Send mocktfl:generateFigure with rCodeText when Generate Figure is clicked.
+- Receive mocktfl:figureGenerated and show the Base64 PNG preview.
+- Send mocktfl:insert with rCodeText and figureBase64 when Insert is clicked.
+- Restore saved rCodeText and figureBase64 when reopening a saved Figure section.
+
+5. MockTFL State Controller
+Path:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflStateController.js
+
+Change:
+- Extend each section snapshot with:
+  - rCodeText
+  - figureBase64
+- Preserve these fields during normalization, draft saves, and snapshot saves.
+
+Design Rationale
+- Tables need separate insertion files because each Word table has a different row, column, header, and border structure.
+- Figures do not need one file per figure because R generates a final image.
+- The Word insertion step is generic: insert a Base64 PNG into the selected Figure body Content Control.
+- Future Figure work items can reuse the same pipeline by adding them to the Figure allowlist.
+
+Prototype Scope
+- The first supported Figure work item is FIGURE 14.2.1.1.
+- The initial output format is PNG.
+- The initial backend execution assumes Rscript is installed and available on PATH.
+- A remote Azure Container App can be used instead of local Rscript when the backend is configured with `MOCKTFL_REMOTE_R_RUNNER_URL`.
+- The UI stores generated images in MockTFL state so reopening the section can restore the last R code and preview.

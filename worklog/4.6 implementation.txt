@@ -1,0 +1,48 @@
+4.6 Implementation (English)
+
+Overview
+- This file records the implementation work completed on 4.6, focusing on extracting the drug comparison from the SAP database, displaying it in the MockTFL UI, and using it to replace hardcoded columns in MockTFL tables with dynamically user-selectable columns.
+
+Implementation 1: Global Drug Comparison Extraction and Persistence
+
+Goal
+- To allow GPT to automatically read the SAP Introduction/Background and extract the drug comparisons (e.g., "EOquin" and "Placebo"), and persist this extraction globally in the MockTFL database so it can be reused across all MockTFL table generation without re-prompting GPT.
+
+Main changes
+- Backend Service: Added `extractDrugComparisonFromSap` in `backend/services/mocktfl/mockTflStartAnalysisService.js` to query the `llxdocument.studies` database for the saved SAP chunk, locate the "Introduction" or "Background" section, and prompt `gpt-4o-mini` to extract the main drug/treatment comparisons. Forced `response_format: { type: "json_object" }` to ensure strictly structured output `{"drug1": "...", "drug2": "..."}`.
+- Backend Route: Created a new POST endpoint `/api/mocktfl/drug-comparison` in `backend/routes/mocktfl.routes.js`.
+- Frontend API Client: Added `extractDrugComparison` API call in `frontend/src/taskpane/domains/mocktfl/api/drugComparison.js`.
+- Database Schema: Updated `MockTFL_Database_Structure.txt` to replace the single `drugComparisonText` field with two distinct `drug1` and `drug2` fields at the root level of the MockTFL data.
+- State Controller: Updated `mockTflStateController.js` to ensure the global `drug1` and `drug2` are properly loaded, merged, and saved without being overwritten during other operations.
+- Taskpane UI & Controller: Modified `taskpane.html` and `dom.js` to add two separate input fields for "Drug 1" and "Drug 2" instead of a large textarea. Updated `appController.js` to bind the extraction and save buttons, and automatically load any previously saved drug names when the MockTFL task is selected.
+
+Result
+- Users can now extract distinct drug names from the SAP with a single click. The extracted names are populated into two separate text inputs, which can be manually edited. Saving persists these distinct values globally for the study.
+
+
+Implementation 2: Dynamic Columns and Checkboxes for MockTFL Tables
+
+Goal
+- To eliminate hardcoded drug names in MockTFL tables (e.g., Patient Disposition) and allow users to dynamically select column headers based on the distinct drugs extracted from the SAP and stored in the database.
+
+Main changes
+- Extracted and Parsed Data: Modified `frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js` to directly read the saved `drug1` and `drug2` from the state. Removed the rigid `parseDrugComparisonToColumns` string parser. The `availableColumns` array is now built directly from `[state.drug1, state.drug2, "Overall"]` and passed to the dialog.
+- Dialog UI Updates: Added a `columns-selection-row` section in `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.html`. Updated `mockTflEditorDialog.js` to dynamically render checkboxes for the `availableColumns`. When the user clicks Insert, the checked columns are collected into a `selectedColumns` array and sent to the controller.
+- Data Layer Adaptation: Modified `buildRowsFromBlocks` in `frontend/src/taskpane/domains/mocktfl/word/tables/parseMockTflEditorText.js` to accept a `columnCount` parameter, dynamically padding table rows with empty cells based on the selected column count.
+- Table Drawing Logic Modification: Updated `frontend/src/taskpane/domains/mocktfl/word/tables/table14_1_1_2_patientDisposition.js` (and demographics) to remove hardcoded `ARM_HEADERS` and generate headers dynamically from the `selectedColumns` array.
+- Dynamic OOXML Column Widths: Modified insertion functions so that the first column maintains a fixed width, while the remaining width is divided equally among the dynamically selected columns.
+
+Result
+- MockTFL tables are drawn fully dynamically based on structured drug inputs. Users see checkboxes for their distinct saved drugs ("Drug 1", "Drug 2", "Overall"). The generated Word table automatically adapts columns and widths based on the selection.
+
+Implementation 3: Documentation and Knowledge Base
+Goal
+- Document the entire "Select drug comparison" logic, database flow, and user interaction to ensure maintainability and future clarity.
+
+Main changes
+- Created a new detailed file `section function detail/mocktfl/Select drug comparison.txt`.
+- Documented the step-by-step logic from UI interaction, database reading, backend GPT extraction (`gpt-4o-mini` with strict JSON structure), to frontend UI display and global MockTFL state saving.
+- Re-organized the folder structure by adding a `mocktfl` subfolder inside `section function detail` and moving the newly created text file into it for better separation of concern.
+
+Result
+- Clear, step-by-step English documentation of the entire Drug Comparison feature is now permanently available in the repository.

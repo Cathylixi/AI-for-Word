@@ -1,0 +1,175 @@
+State Management (Save and Reload) and Content Control
+
+Overview
+This document explains how the AI-for-Word MockTFL module preserves the user's progress and links the cloud database to the local Word document. The MockTFL feature uses a global, document-level state architecture. Instead of saving each table or section as an independent database record, the entire MockTFL work session for a study is stored as a single JSON document. 
+
+Alongside the database, the system relies heavily on Word Content Controls to act as physical anchors in the document. This ensures that the AI and the user are always talking about the exact same piece of text, even if the user manually changes the title or navigates away and returns later.
+
+End-to-End Purpose
+This architecture solves the following problems:
+- When a user closes the taskpane and returns the next day, they should not lose their extracted drug comparisons or their inserted MockTFL entries.
+- When a user opens an editor for a specific table (e.g., TABLE 14.1.1.2), they should see their previous GPT analysis, confirmed variables, and mapped CRF options exactly as they left them.
+- The backend needs to know exactly which Word paragraph belongs to which table in order to read user edits or insert the final OOXML table.
+- Since multiple users or sessions might modify parts of the MockTFL document, the save operations must merge section-level changes without accidentally overwriting global settings (like drug names) or other sections' data.
+
+High-Level Architecture
+
+1. Single Database Record:
+All MockTFL state for a study is stored in the `llxdocument.studies` collection under the condition:
+  `{ studyNumber: "...", chunkType: "MockTFL" }`
+
+2. Global and Sectional Data:
+The `data` field of this record contains:
+- Global settings: `drug1`, `drug2`
+- The list of inserted templates: `entries`
+- An array of analysis snapshots for each individual table/figure/listing: `sectionsData`
+
+3. Content Control Tags:
+Every MockTFL item inserted into Word is wrapped in two Content Controls:
+- A Title Content Control (tagged `mocktfl-title:STUDY:TYPE:NUMBER`)
+- A Body Content Control (tagged `mocktfl-body:STUDY:TYPE:NUMBER`)
+
+Main Files Involved
+
+Frontend State Controller
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflStateController.js
+
+Frontend State API
+- frontend/src/taskpane/domains/mocktfl/api/state.js
+
+Frontend Content Control Helpers
+- frontend/src/taskpane/domains/mocktfl/word/constants.js
+- frontend/src/taskpane/domains/mocktfl/word/sections.js
+
+Backend Routes
+- backend/routes/mocktfl.routes.js
+
+Detailed Logic: Database State Management
+
+Step 1: The Database Schema
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflStateController.js
+
+Behavior:
+The `buildMockTflSaveState` function constructs the final JSON object saved to the database. It looks like this:
+{
+  "saved": true,
+  "lastSavedAt": "2026-04-08T...",
+  "schemaVersion": 3,
+  "drug1": "Abelacimab",
+  "drug2": "Apixaban",
+  "entries": [
+    { "type": "TABLE", "number": "14.1.1.2", "title": "Patient Disposition", "label": "TABLE 14.1.1.2 Patient Disposition" }
+  ],
+  "sectionsData": [
+    {
+      "key": "TABLE:14.1.1.2",
+      "type": "TABLE",
+      "number": "14.1.1.2",
+      "saved": true,
+      "matchedSapLabel": "...",
+      "matchedSapSectionText": "...",
+      "suggestedVariablesText": "...",
+      "mappedCrfText": "...",
+      "notesText": "...",
+      "updatedAt": "..."
+    }
+  ]
+}
+
+Purpose:
+- `entries` keeps track of what the user chose during the "Insert Template" phase.
+- `drug1` and `drug2` keep track of what was extracted during the "Select drug comparison" phase.
+- `sectionsData` keeps track of the individual analysis drafts generated during the "Open Editor" phase.
+
+Step 2: Triggering a Save
+There are three main triggers for saving the MockTFL state, all located in `mockTflStateController.js`:
+
+Trigger A: Saving the Global Drug Comparison
+Function: `saveMockTflDrugComparison({ studyNumber, drug1, drug2 })`
+Behavior:
+- Loads the existing state from the database.
+- Keeps the old `entries` and `sectionsData` intact.
+- Replaces `drug1` and `drug2` with the new values.
+- Saves the state.
+
+Trigger B: Saving the entire MockTFL Draft (Save to Database button)
+Function: `handleSaveMockTfl({ studyNumber, insertedEntries })`
+Behavior:
+- Loads the existing state.
+- Normalizes the currently inserted `entries`.
+- Calls `ensureSectionsDataForEntries`. If a new entry was added, it creates an empty blank draft (snapshot) for it in `sectionsData`.
+- Keeps `drug1` and `drug2` intact.
+- Saves the state.
+
+Trigger C: Saving a specific Section Snapshot (after clicking Insert in the Editor)
+Function: `saveMockTflSectionSnapshot({ studyNumber, insertedEntries, snapshot })`
+Behavior:
+- Loads the existing state.
+- Uses `mergeSectionSnapshot(existingState.sectionsData, snapshot)`.
+- Finds the specific `sectionsData` array item matching the snapshot's `key` (e.g., `TABLE:14.1.1.2`).
+- Overwrites that specific item with the new SAP/CRF mapping texts and sets `saved: true`.
+- Keeps all other `sectionsData` items, `entries`, and `drugs` intact.
+- Saves the state.
+
+Purpose:
+- This "load-merge-save" pattern guarantees that updating one table's draft does not wipe out the drug comparison, and updating the drug comparison does not wipe out a table's draft.
+
+Step 3: Loading the State
+File:
+- frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js
+
+Behavior:
+When the user clicks "Open Editor", the controller calls `loadMockTflState({ studyNumber })` before opening the dialog.
+- It extracts `drug1` and `drug2` to build the dynamic column checkboxes.
+- It calls `findMockTflSectionData(state, { type, number })` to search the `sectionsData` array.
+- If it finds a snapshot where `saved === true`, it sends a `mocktfl:loadSavedSectionData` message to the dialog.
+- The dialog then populates the Textareas with the `matchedSapSectionText`, `suggestedVariablesText`, and `mappedCrfText` from the database.
+
+Purpose:
+- To seamlessly restore the exact state of the AI analysis so the user doesn't have to re-run GPT every time they open a table.
+
+Detailed Logic: Word Content Controls
+
+Step 4: Why Content Controls are necessary
+The database only saves the *draft data*. It does not save the actual Word document layout. To ensure that the taskpane and the Word document stay synchronized, the system uses invisible markers called Content Controls.
+
+File:
+- frontend/src/taskpane/domains/mocktfl/word/constants.js
+
+Tags:
+- `mocktfl-title:STUDYNUMBER:TYPE:NUMBER` (e.g., `mocktfl-title:ANT-007:TABLE:14.1.1.2`)
+- `mocktfl-body:STUDYNUMBER:TYPE:NUMBER` (e.g., `mocktfl-body:ANT-007:TABLE:14.1.1.2`)
+
+These tags are assigned to the Content Controls when the user clicks "Insert Template".
+
+Step 5: Using Content Controls to read the Truth
+File:
+- frontend/src/taskpane/domains/mocktfl/word/sections.js
+
+Function: `readMockTflTitle({ studyNumber, type, number })`
+Behavior:
+- When the user clicks "Start Analysis" inside the Editor, the system does NOT use the title from the database.
+- Instead, it searches the Word document: `context.document.contentControls.getByTag(tag)`
+- It extracts the physical text sitting inside that Title Content Control.
+- It then uses `extractPureTitleFromMockTflTitleCcText` to strip away the "TABLE 14.1.1.2" prefix and get the pure semantic title.
+
+Purpose:
+- If a user manually changes the table's title in Word (e.g., from "Patient Disposition" to "Subject Disposition"), the GPT analysis and SAP matching will use the *new* title, because the Content Control acts as a dynamic window into the document.
+
+Step 6: Using Content Controls to Insert Data
+File:
+- frontend/src/taskpane/domains/mocktfl/word/tables/table14_1_1_2_patientDisposition.js
+
+Behavior:
+- When the user clicks "Insert" in the Editor, the code must figure out *where* to draw the table.
+- It searches for the Body tag: `context.document.contentControls.getByTag(tag)`
+- It selects the first matching Content Control.
+- It calls `placeholderCc.clear()` to erase the old "Type your notes here..." text.
+- It calls `placeholderCc.insertOoxml(ooxml, Word.InsertLocation.start)` to inject the fully rendered table exactly where the placeholder used to be.
+
+Purpose:
+- Content Controls eliminate the need to track cursors or bookmarks. No matter how much text the user types before or after the table, the system can instantly teleport to the correct paragraph and safely replace its contents.
+
+Summary
+The MockTFL state management uses a master JSON record to persist all global choices and localized drafts, ensuring safe, merged updates. Meanwhile, Word Content Controls serve as permanent, tagged coordinates in the document. This dual-architecture guarantees that the AI analysis always runs on the most up-to-date document text, and that the final tables are always inserted in exactly the right place, even across different work sessions.

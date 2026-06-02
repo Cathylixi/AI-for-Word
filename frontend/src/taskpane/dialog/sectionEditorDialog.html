@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Section Editor</title>
+
+    <!-- Office JavaScript API -->
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  </head>
+
+  <body>
+    <style>
+      body {
+        margin: 0;
+        padding: 14px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+        font-size: 13px;
+        color: #1a1a1a;
+      }
+      h2 {
+        margin: 0 0 10px 0;
+        font-size: 16px;
+      }
+      .row { margin-bottom: 10px; }
+      .label { display: block; font-weight: 600; margin-bottom: 6px; }
+      textarea {
+        width: 100%;
+        min-height: 220px;
+        resize: vertical;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font: inherit;
+        box-sizing: border-box;
+      }
+      .context-grid {
+        display: flex;
+        gap: 12px;
+      }
+      .context-col {
+        flex: 1;
+        min-width: 0;
+      }
+      .context-col textarea {
+        min-height: 140px;
+        background: #fafafa;
+      }
+      .context-meta {
+        font-size: 12px;
+        color: #666;
+        margin-bottom: 6px;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      button {
+        padding: 7px 10px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #fff;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      button.primary { background:#106ebe; color:#fff; border-color:#106ebe; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .status { font-size: 12px; color: #666; margin-top: 8px; }
+    </style>
+
+    <h2 id="section-title">Section</h2>
+
+    <div class="row">
+      <span class="label">AI text generation</span>
+      <button id="btn-generate" class="primary">Generate with AI</button>
+    </div>
+
+    <div class="row">
+      <span class="label">Section notes</span>
+      <textarea id="editor" placeholder="Review and edit here..."></textarea>
+      <div id="titlepage-editor" style="display:none;">
+        <div class="row">
+          <span class="label">Protocol Title</span>
+          <textarea id="tp-protocolTitle" style="min-height:80px;" placeholder="Protocol Title"></textarea>
+        </div>
+        <div class="row">
+          <span class="label">Protocol Number</span>
+          <textarea id="tp-protocolNumber" style="min-height:80px;" placeholder="Protocol Number"></textarea>
+        </div>
+        <div class="row">
+          <span class="label">Protocol Version, Date</span>
+          <textarea id="tp-protocolVersionDate" style="min-height:80px;" placeholder="Protocol Version, Date"></textarea>
+        </div>
+        <div class="row">
+          <span class="label">Document Version, Date</span>
+          <textarea id="tp-documentVersionDate" style="min-height:80px;" placeholder="Document Version, Date"></textarea>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="btn-insert" class="primary" disabled>Insert</button>
+        <button id="btn-modify" disabled>Modify</button>
+        <button id="btn-clear" disabled>Clear</button>
+        <button id="btn-apply-abbrev" disabled style="display:none;">Apply to Body</button>
+      </div>
+    </div>
+
+    <div class="row" id="context-row" style="display:none;">
+      <span class="label">Matched context</span>
+      <div class="context-grid">
+        <div class="context-col">
+          <div class="context-meta" id="protocol-section-name">Protocol context</div>
+          <textarea id="protocol-context" readonly></textarea>
+        </div>
+        <div class="context-col">
+          <div class="context-meta" id="crf-form-name">CRF context</div>
+          <textarea id="crf-context" readonly></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" id="modify-area" style="display:none; margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px;">
+      <span class="label">Modify prompt</span>
+      <textarea id="modify-prompt" style="min-height: 60px;" placeholder="Enter instructions to refine the content (e.g. 'Make it shorter')..."></textarea>
+      <div class="actions">
+        <button id="btn-regenerate" class="primary">Regenerate</button>
+        <button id="btn-cancel-modify">Cancel</button>
+      </div>
+    </div>
+
+    <div id="status" class="status"></div>
+  </body>
+</html>
+

@@ -1,0 +1,49 @@
+4.29 Implementation (English)
+
+Overview
+- This file records the implementation work completed on 4.29, focusing on adding the first MockTFL Figure workflow for FIGURE 14.2.1.1, including R code generation, PNG preview, Word image insertion, and section-level state persistence.
+
+Implementation 1: MockTFL Figure R Generation Backend
+
+Goal
+- To allow the MockTFL editor to send user-provided R code to the backend, run it through Rscript, and return a generated PNG image that can be previewed and inserted into Word.
+
+Main changes
+- Backend Service: Added `backend/services/mocktfl/mockTflFigureService.js` to wrap R code in a PNG graphics device, execute it with `Rscript --vanilla`, read the generated PNG, convert it to Base64, and clean up temporary files.
+- Backend Service: Added support for `RSCRIPT_PATH` / `R_SCRIPT_PATH` so Windows machines can point directly to `Rscript.exe` when it is not available on PATH.
+- Backend Service: Added remote Azure R Runner support through `MOCKTFL_FIGURE_RUNNER=remote` and `MOCKTFL_REMOTE_R_RUNNER_URL`, allowing figure generation without installing R locally.
+- Backend Route: Added `POST /api/mocktfl/generate-figure` in `backend/routes/mocktfl.routes.js`, scoped to the prototype target `FIGURE 14.2.1.1`.
+- Backend Route: Updated Figure generation failures to return the detailed R/Rscript error message to the frontend instead of only a generic failure message.
+- Frontend API Client: Added `frontend/src/taskpane/domains/mocktfl/api/generateFigure.js` and exported it from the MockTFL domain index.
+
+Result
+- The frontend can now request a generated PNG image from R code for the first supported Figure work item.
+
+
+Implementation 2: Figure Editor UI and Word Image Insertion
+
+Goal
+- To make the Open Editor dialog switch into a Figure-specific workflow when the selected work item is `FIGURE 14.2.1.1`, with an R code box, Generate button, preview image, and Insert action.
+
+Main changes
+- Dialog UI: Updated `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.html` with a dedicated Figure workflow panel containing an R code textarea, `Generate Figure` button, preview area, and Figure-specific Insert/Clear/Close buttons.
+- Dialog Logic: Updated `mockTflEditorDialog.js` to detect Figure work items, hide the table analysis workflow, send `mocktfl:generateFigure`, receive `mocktfl:figureGenerated`, render the PNG preview, and send the generated image back on Insert.
+- Word Helper: Added `frontend/src/taskpane/domains/mocktfl/word/figures/insertFigure.js` to locate the selected MockTFL body Content Control and insert the generated Base64 PNG.
+- Work Controller: Updated `mockTflWorkController.js` to handle `mocktfl:generateFigure`, call the backend, cache the generated Base64 image, and insert it into Word for Figure targets.
+
+Result
+- Selecting `FIGURE 14.2.1.1` from "Start working on" and opening the editor now gives the user a Figure-specific R code workflow instead of the table SAP/CRF workflow.
+
+
+Implementation 3: Figure State Persistence and Documentation
+
+Goal
+- To preserve the user's R code and generated figure preview across dialog reopen/save flows, and document the planned Figure architecture for future maintenance.
+
+Main changes
+- State Controller: Extended MockTFL section snapshots in `mockTflStateController.js` with `rCodeText` and `figureBase64`.
+- Draft Save: The generated Figure preview is saved as a draft immediately after successful generation, so the dialog can restore it if reopened before final insertion.
+- Documentation: Added `section function detail/mocktfl/figures/MockTFL Figure R Generation Plan.txt` with the full English implementation plan, file responsibilities, and design rationale.
+
+Result
+- The Figure workflow now has persistent section-level state and a maintainable English design document for future Figure targets.

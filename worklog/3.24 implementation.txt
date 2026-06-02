@@ -1,0 +1,110 @@
+SPI-611 SAP Example Upload - 3.24 Implementation (English)
+
+Overview
+- This worklog now covers both the original SPI-611 SAP example upload and the follow-up integration work built on top of that upload.
+- The follow-up work includes:
+  - using the SPI-611 SAP example as a writing reference in SAP generation,
+  - extending MockTFL start analysis with GPT drafting guidance and suggested statistical variables,
+  - showing those new analysis outputs in the MockTFL editor,
+  - and improving SAP "Save to Database" reliability for large payloads.
+
+Summary
+- Kept the original SPI-611 SAP example upload as the base data source.
+- Confirmed that SAP generation uses the matched SPI-611 SAP example section as writing-style guidance on the backend.
+- Extended MockTFL start analysis so GPT now returns:
+  - suggested statistical variables for the current MockTFL item.
+- Updated the MockTFL editor dialog to show:
+  - matched SAP section text,
+  - suggested statistical variables,
+  - mapped CRF questions and answers for those suggested variables.
+- Improved backend/frontend error handling for large SAP save payloads:
+  - increased Express JSON body size limit,
+  - returned JSON errors instead of default HTML where possible,
+  - improved frontend response parsing so non-JSON responses are easier to diagnose.
+
+Detailed implementation
+
+What was done
+- Added a new upload script in `AI-for-Word/example file/upload_spi611_sap_to_references.js`.
+- The script reads `CMAA868D12302_Statistical Analysis Plan_AI.docx` and uploads it to `References.SAP_SPI611`.
+- The document is stored in a SAP-like state format with:
+  - `data.entries`
+  - `data.sections`
+  - `frontMatterText`
+
+Parsing logic
+- Extract text from the DOCX body only.
+- Ignore images.
+- Ignore table content.
+- Split the document by section/subsection using Word heading styles.
+- Use plain numbered headings as a fallback when needed.
+- Keep section text in reading order and store it by section number.
+
+Upload result
+- Uploaded successfully to MongoDB `References.SAP_SPI611`.
+- Verified that section numbers and titles were stored correctly.
+- Verified that section body text was saved and can be read back from the database.
+
+SAP generation integration
+- The SPI-611 SAP example is not only stored in MongoDB; it is also used at generation time as a writing-style reference.
+- In SAP generation, the backend matches the current SAP section against the SPI-611 reference entries and retrieves the matched SPI-611 example text.
+- That SPI-611 example text is added to the prompt as a style/structure reference only.
+- The prompt explicitly instructs the model to learn paragraph structure, tone, and level of detail from the SPI-611 example, but not to copy study-specific facts or wording.
+- The backend also returns the matched SPI-611 example metadata and example text in the generation result, although the current SAP editor UI does not yet render that block.
+
+MockTFL start analysis enhancement
+- Extended the unified MockTFL start analysis flow in `backend/services/mocktfl/mockTflStartAnalysisService.js`.
+- The flow still:
+  - embeds the MockTFL pure title,
+  - matches the saved SAP section by title embedding,
+  - matches the CRF form,
+  - and maps analysis items back to CRF questions.
+- On top of that, GPT now returns the statistical variables needed for the current MockTFL item.
+- Implemented structured response parsing for this GPT step:
+  - the model is asked to return valid JSON,
+  - the service parses JSON directly or from fenced JSON blocks,
+  - the service normalizes/de-duplicates the returned string lists,
+  - the service formats them into numbered text blocks for UI display.
+- Kept backward compatibility for downstream CRF mapping.
+- Changed CRF mapping to use the GPT-suggested statistical variables as the source bullets before matching them to CRF questions.
+
+MockTFL editor dialog update
+- Updated the MockTFL dialog UI in:
+  - `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.html`
+  - `frontend/src/taskpane/dialog/mocktfl/mockTflEditorDialog.js`
+  - `frontend/src/taskpane/domains/mocktfl/controller/mockTflWorkController.js`
+- Added new read-only sections in the dialog:
+  - `Suggested statistical variables`
+- Kept the existing matched SAP section text panel.
+- Updated the CRF mapping panel label so it is now clearer that the mappings are for the suggested variables rather than for generic analysis bullets.
+- Added/updated English code comments in the new logic so the intent of the data flow is explicit.
+
+Current MockTFL editor behavior
+- The top editable notes textbox is still populated from the CRF question list, not from the suggested statistical variables.
+- Current content in that textbox is built from:
+  - MockTFL title,
+  - matched CRF form,
+  - extracted CRF questions.
+- The new suggested statistical variables are currently shown in their own dedicated read-only section.
+- The CRF mapping panel is generated from those suggested statistical variables.
+- Current table insertion still uses the stored `analysisQuestions` payload, so insertion behavior has not yet been switched to use suggested statistical variables as the primary row labels.
+
+SAP save reliability fix
+- Investigated the SAP "Save to Database" failure:
+  - frontend error originally showed `Unexpected token '<'`,
+  - later error text showed `PayloadTooLargeError: request entity too large`.
+- Root cause:
+  - the SAP save payload includes the full generated SAP state,
+  - the payload exceeded the default Express JSON body limit,
+  - Express returned its default HTML error page before the request reached the SAP save route.
+- Applied backend fix in `backend/server.js`:
+  - increased `express.json()` body limit,
+  - added JSON-based error handling for oversized payloads and malformed JSON bodies.
+- Applied frontend fix in `frontend/src/taskpane/shared/api/client.js`:
+  - response parsing now reads raw text first,
+  - attempts JSON parsing explicitly,
+  - raises a clearer error when a non-JSON response is returned.
+- Validation:
+  - frontend build passed,
+  - updated backend files loaded successfully,
+  - no new linter errors were introduced in the touched files.

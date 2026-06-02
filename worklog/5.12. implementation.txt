@@ -1,0 +1,46 @@
+5.12 Implementation (English)
+
+Overview
+- This file records the implementation work completed on May 12, focusing on integrating the RTF-to-PDF conversion into the SAS-TOC Workflow Tool, introducing a custom combine order dialog, and refining the clickable Table of Contents (TOC) page and Excel outputs.
+
+Implementation 1: End-to-End RTF to SAS-TOC Workflow Integration
+
+Goal
+- To streamline the process by creating a single, unified tool that takes a folder of RTF files, converts them to PDFs, extracts titles, generates a TOC mapping Excel, applies bookmarks, and combines them into a single PDF with a clickable TOC page.
+
+Main changes
+- Copied core modules (`rtf_scanner.py`, `title_extractor.py`, `word_converter.py`, `toc_excel_writer.py`) from the RTF-PDF Workflow into the SAS-TOC Workflow.
+- Refactored `workflow_runner.py` into a two-phase architecture (`run_rtf_conversion_phase` and `run_combine_phase`).
+- Updated the GUI (`main_window.py`) to accept an RTF folder as input and orchestrate the unified end-to-end workflow on background threads.
+
+Result
+- Users can now select an RTF folder and run the entire conversion, bookmarking, and combining pipeline in a single desktop application without manually handling intermediate PDF outputs.
+
+
+Implementation 2: Customize Combine Order Dialog
+
+Goal
+- To allow users to reorder both the top-level document categories (Table, Figure, Listing, Other) and the individual files within those categories before finalizing the combined PDF.
+
+Main changes
+- Created `sorter.py` to group parsed RTF files into categories based on their extracted titles and flatten them according to user preference.
+- Developed a new modal Tkinter dialog (`sort_dialog.py`) featuring two interactive listboxes with Up/Down/Top/Bottom controls for adjusting categories and files.
+- Fixed a bug in `pdf_combiner.py` (`_resolve_input_files`) where the custom user order was being overridden by an unintended natural sort, ensuring the custom order persists across the generated `TOC.xlsx`, PDF bookmarks, and final combined PDF pages.
+
+Result
+- A popup dialog successfully interrupts the workflow post-RTF conversion, allowing users to define the exact sequence of the final combined output without manually editing Excel files.
+
+
+Implementation 3: Clickable TOC Page and TOC Excel Refinements
+
+Goal
+- To improve the visual presentation and readability of the generated clickable TOC page in the combined PDF, and format the intermediate `TOC.xlsx` file appropriately.
+
+Main changes
+- Modified `toc_generator.py` to implement a greedy word-wrapping algorithm (`_wrap_text_into_lines`) for long titles, preventing text truncation.
+- Adjusted the TOC styling so that the "Table of Contents" title is black, while the clickable entries and page numbers are hyperlink-blue.
+- Prepended a "Table of Contents" bookmark to the PDF outline so the TOC page itself appears in the navigation pane.
+- Updated `toc_excel_writer.py` to output base filenames without `.rtf` or `.pdf` extensions, and configured openpyxl alignment settings to wrap text and dynamically auto-size row heights and column widths.
+
+Result
+- The clickable TOC page cleanly displays multi-line titles without cutting them off, visually distinguishes links in blue, and the generated `TOC.xlsx` is natively formatted for easy reading.
